@@ -556,6 +556,20 @@
       ${pages > 1 ? `<div class="pager">Página ${f.page} de ${pages}<button class="btn sm" type="button" data-act="page" data-t="rev" data-p="${f.page - 1}" ${f.page <= 1 ? 'disabled' : ''}>Anterior</button><button class="btn sm" type="button" data-act="page" data-t="rev" data-p="${f.page + 1}" ${f.page >= pages ? 'disabled' : ''}>Próxima</button></div>` : ''}`;
   }
 
+  /** Itens da relação oficial (Subanexo I) correspondentes ao item de ST. */
+  function oficialHTML(it) {
+    const o = it.oficial;
+    if (!o) return '';
+    if (!o.cands.length) return `<div class="sec"><h4>Relação oficial (Subanexo I do Anexo III do RICMS/MS)</h4><div class="callout warn small">Nem o CEST${U.digits(it.cest) ? ` ${h(U.fmtCEST(it.cest))}` : ''} nem o NCM ${h(U.fmtNCM(it.ncm))} constam da relação de mercadorias sujeitas à ST em MS.</div></div>`;
+    const mv = v => v === undefined || v === null ? '—' : U.fmt(v, 2);
+    return `<div class="sec"><h4>Relação oficial (Subanexo I do Anexo III do RICMS/MS)</h4>
+      <div class="muted small" style="margin-bottom:6px">${o.por === 'cest' ? `Encontrado pelo CEST ${h(U.fmtCEST(it.cest || it.cestXml))}.` : `Sem CEST na relação: itens que abrangem o NCM ${h(U.fmtNCM(it.ncm))} — confira qual descrição corresponde ao produto.`}</div>
+      <div class="table-wrap"><table class="data"><thead><tr><th>Item / CEST</th><th>Descrição oficial</th><th class="num">MVA orig.</th><th class="num">4%</th><th class="num">7%</th><th class="num">12%</th></tr></thead><tbody>
+      ${o.cands.slice(0, 6).map(c => `<tr><td class="small nowrap">${h(c.item)}<div class="sub">${h(U.fmtCEST(c.cest))}</div></td><td class="small">${h(c.desc)}${c.cond ? `<div class="sub">${h(c.cond)}</div>` : ''}${c.mvaTxt ? `<div class="sub">MVA: ${h(c.mvaTxt)}</div>` : ''}<div class="sub">NCM ${h((c.ncm || []).map(U.fmtNCM).join(', ') || '—')}</div></td><td class="num">${mv(c.mva)}</td><td class="num">${mv(c.mva4)}</td><td class="num">${mv(c.mva7)}</td><td class="num">${mv(c.mva12)}</td></tr>`).join('')}
+      ${o.cands.length > 6 ? `<tr><td colspan="6" class="small muted">e mais ${o.cands.length - 6} item(ns)</td></tr>` : ''}
+      </tbody></table></div></div>`;
+  }
+
   function itemKV(it) {
     if (!it) return '';
     const kv = (lb, v) => `<div><span>${h(lb)}</span><b>${v}</b></div>`;
@@ -564,10 +578,10 @@
         ${kv('NCM / CEST', h(ncmCest(it.ncm, it.cest) || '—'))}${kv('GTIN', h(it.gtin || '—'))}${kv('CST / CFOP', h(`${it.cst || '—'} / ${it.cfop || '—'}`))}
         ${kv('Quantidade', h(`${U.fmt(it.qtd || 0, 2)} ${it.un || ''}`))}${kv('Valor da mercadoria', U.brl(it.valorTotal))}${kv('IPI', U.brl(it.ipi))}
         ${kv('Frete / outros', `${U.brl(it.frete)} / ${U.brl(it.outros)}`)}${kv('Custo final', U.brl(it.custoFinal))}${kv('MVA ajustada aplicada', it.mvaAj === null ? (it.temPauta ? 'pauta (PMPF)' : '—') : U.pct(it.mvaAj))}
-        ${kv('MVA original equivalente', it.mvaOrig === null ? '—' : U.pct(it.mvaOrig))}${kv('MVA da tabela', it.mvaTab === null || it.mvaTab === undefined ? 'não cadastrada' : U.pct(it.mvaTab))}${kv('Base ST', U.brl(it.bcST))}
+        ${kv('MVA original equivalente', it.mvaOrig === null ? '—' : U.pct(it.mvaOrig))}${kv('MVA de referência', it.mvaTab === null || it.mvaTab === undefined ? (it.oficial && it.oficial.cands.length ? 'sem MVA na relação' : 'não encontrada') : `${U.pct(it.mvaTab)} <span class="sub">(${it.mvaRef && it.mvaRef.oficial ? 'Subanexo I' : 'sua tabela'})</span>`)}${kv('Base ST', U.brl(it.bcST))}
         ${kv('Alíquota interna', U.pct(it.aliqIntra))}${kv('Alíq. interestadual', `${U.pct(it.aliqInter || 0)} <span class="sub">(${h(it.aliqInterFonte || '')})</span>`)}${kv('Crédito admitido', U.brl(it.credito))}
         ${kv('ICMS cobrado', U.brl(it.icms))}${kv('ICMS recalculado', U.brl(it.icmsCalc))}${it.xmlItem ? kv('XML: ICMS-ST retido', U.brl(it.xmlItem.vICMSST || 0)) : ''}
-      </div></div>`;
+      </div></div>${oficialHTML(it)}`;
     }
     return `<div class="sec"><h4>Dados do item (memória Equalização)</h4><div class="kv card card-pad">
       ${kv('NCM', h(U.fmtNCM(it.ncm) + (it.ncmTruncado ? ' (truncado)' : '')))}${kv('Valor da mercadoria', U.brl(it.valorTotal))}${kv('Frete / seguro', `${U.brl(it.frete)} / ${U.brl(it.seguro)}`)}
@@ -868,6 +882,63 @@
     }).sort((a, b) => b.n - a.n);
   }
 
+  /* ---------- Relação oficial (Subanexo I do Anexo III do RICMS/MS) ---------- */
+  const subanexoAtual = () => (App.state.subanexo && App.state.subanexo.itens) ? App.state.subanexo : (global.RST_SUBANEXO_PADRAO || null);
+
+  function subResultados() {
+    const sub = subanexoAtual();
+    const q = String(App.ui.subQ || '').trim();
+    if (!sub || q.length < 3) return '<div class="muted small">Digite ao menos 3 caracteres.</div>';
+    const res = global.RST_SUB.pesquisar(sub, q, 40);
+    if (!res.length) return '<div class="muted small">Nada encontrado na relação.</div>';
+    const mv = v => v === undefined || v === null ? '—' : U.fmt(v, 2);
+    return `<div class="table-wrap"><table class="data"><thead><tr><th>Item / CEST</th><th>NCM</th><th>Descrição</th><th class="num">MVA orig.</th><th class="num">4%</th><th class="num">7%</th><th class="num">12%</th></tr></thead><tbody>
+      ${res.map(e => `<tr><td class="small nowrap">${h(e.item)}<div class="sub">${h(U.fmtCEST(e.cest))} · seg. ${h(e.seg)}</div></td><td class="small">${h((e.ncm || []).map(U.fmtNCM).join(', ') || '—')}</td><td class="small">${h(e.desc)}${e.cond ? `<div class="sub">${h(e.cond)}</div>` : ''}${e.mvaTxt ? `<div class="sub">MVA: ${h(e.mvaTxt)}</div>` : ''}</td><td class="num">${mv(e.mva)}</td><td class="num">${mv(e.mva4)}</td><td class="num">${mv(e.mva7)}</td><td class="num">${mv(e.mva12)}</td></tr>`).join('')}
+      </tbody></table></div>${res.length === 40 ? '<div class="tiny muted">Mostrando os 40 primeiros — refine a busca.</div>' : ''}`;
+  }
+
+  function cardSubanexo(S) {
+    const sub = subanexoAtual();
+    if (!sub || !global.RST_SUB) return '';
+    const proprio = !!(App.state.subanexo && App.state.subanexo.itens);
+    const emUso = S.usarSubanexo !== false;
+    const nSeg = U.uniq(sub.itens.map(e => e.seg)).length;
+    return `<div class="card">
+      <div class="card-head"><h3>Relação oficial de mercadorias com ST — Subanexo I do Anexo III do RICMS/MS</h3><span class="pill ${emUso ? 'ok' : 'neutro'}">${emUso ? 'em uso' : 'desligada'}</span></div>
+      <div class="card-pad stack">
+        <div class="muted small">${U.int(sub.itens.length)} itens em ${nSeg} segmentos · ${proprio ? 'versão importada por você' : 'versão que acompanha o app'}${sub.obtidoEm ? `, obtida em ${h(U.brDate(sub.obtidoEm))}` : ''}${sub.ultimoDecreto ? `, com alterações até o ${h(sub.ultimoDecreto)}` : ''}. Com ela, o app confere a MVA de cada item de ST, aponta mercadoria fora da lista e mostra a descrição oficial do item. Itens que você cadastrar na tabela de MVA abaixo prevalecem sobre a relação.</div>
+        <div class="row" style="flex-wrap:wrap;gap:8px">
+          <label class="check"><input type="checkbox" data-set="usarSubanexo" ${emUso ? 'checked' : ''}> Usar a relação oficial nas conferências</label>
+          <span class="sp"></span>
+          <button class="btn sm" type="button" data-act="sub-importar">${ic('upload')} Atualizar com nova versão (.docx)</button>
+          ${proprio ? '<button class="btn sm ghost" type="button" data-act="sub-padrao">Voltar à versão do app</button>' : ''}
+        </div>
+        <div class="tiny muted">Para atualizar: baixe o Subanexo I no site da SEFAZ/MS, abra no Word e salve como "Documento do Word (.docx)"; depois clique em "Atualizar". O app lê só a redação em vigor (ignora as redações anteriores).</div>
+        <label class="field"><span>Consultar a relação (NCM, CEST ou palavras da descrição)</span><input type="search" id="sub-q" value="${h(App.ui.subQ || '')}" placeholder="Ex.: 3924, 14.006.00, cadeado" autocomplete="off"></label>
+        <div id="sub-res">${String(App.ui.subQ || '').trim().length >= 3 ? subResultados() : ''}</div>
+      </div>
+    </div>`;
+  }
+
+  async function importarSubanexo() {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.docx,.doc';
+    inp.addEventListener('change', async () => {
+      const f = inp.files && inp.files[0];
+      if (!f) return;
+      try {
+        const dados = global.RST_SUB.lerDocx(await f.arrayBuffer());
+        const atual = subanexoAtual();
+        const nSeg = U.uniq(dados.itens.map(e => e.seg)).length;
+        if (!global.confirm(`Relação lida: ${dados.itens.length} itens em ${nSeg} segmentos${dados.ultimoDecreto ? `, com alterações até o ${dados.ultimoDecreto}` : ''}.${atual ? ` A versão em uso tem ${atual.itens.length} itens.` : ''}\n\nUsar esta versão nas conferências?`)) return;
+        App.state.subanexo = Object.assign({ fonte: 'RICMS/MS, Anexo III, Subanexo I', arquivo: f.name, obtidoEm: U.today() }, dados);
+        commit();
+        toast(`Relação oficial atualizada: ${dados.itens.length} itens.`, 'ok');
+      } catch (err) { toast('Não foi possível ler o arquivo: ' + h(err.message), 'err', 8000); }
+    });
+    inp.click();
+  }
+
   function viewTabelas() {
     const S = E.settingsOf(App.state);
     const mv = App.state.mvaTable;
@@ -884,15 +955,17 @@
           ${num('tolerancia', 'Tolerância de arredondamento (R$)', S.tolerancia, '0.01', 'diferenças menores são ignoradas')}
           ${num('outrosLimitePct', 'Alerta de "outros valores" acima de (%)', S.outrosLimitePct, '1', 'do valor da mercadoria')}
           <label class="field"><span>Cálculo do diferencial (uso e consumo)</span><select data-set="difalMetodo">${opt('por_dentro', 'Base "por dentro" (conservador)', S.difalMetodo)}${opt('simples', 'Diferença simples de alíquotas', S.difalMetodo)}</select></label>
-          <label class="check" style="margin-top:20px"><input type="checkbox" data-set="tabelaSTCompleta" ${S.tabelaSTCompleta ? 'checked' : ''}> A tabela de ST abaixo é completa (itens fora dela = fora da ST)</label>
+          ${S.usarSubanexo === false ? `<label class="check" style="margin-top:20px"><input type="checkbox" data-set="tabelaSTCompleta" ${S.tabelaSTCompleta ? 'checked' : ''}> A tabela de ST abaixo é completa (itens fora dela = fora da ST)</label>` : ''}
         </div>
       </div>
 
+      ${cardSubanexo(S)}
+
       <div class="card">
-        <div class="card-head"><h3>Tabela de MVA / mercadorias sujeitas à ST em MS</h3><span class="pill neutro">${mv.length}</span>
+        <div class="card-head"><h3>Sua tabela de MVA (ajustes)</h3><span class="pill neutro">${mv.length}</span>
           <div class="sp"><button class="btn sm" type="button" data-act="mva-add">${ic('plus')} Linha</button><button class="btn sm" type="button" data-act="mva-export" ${mv.length ? '' : 'disabled'}>${ic('download')} CSV</button><button class="btn sm ghost danger" type="button" data-act="mva-clear" ${mv.length ? '' : 'disabled'}>${ic('trash')} Limpar</button></div></div>
         <div class="card-pad stack">
-          <div class="muted small">Copie do Subanexo I do Anexo III do RICMS/MS (ou do portal de ST da SEFAZ/MS) as linhas dos produtos que suas empresas compram e cole abaixo — colunas: <b>CEST; NCM; Descrição; MVA original; MVA 4%; MVA 7%; MVA 12%; Fonte</b>. Com a tabela, o sistema confere a MVA de cada item e, se marcada como completa, aponta mercadorias fora da ST.</div>
+          <div class="muted small">Use para ajustes: uma MVA específica (regime especial, protocolo) ou um produto que você queira tratar de outro modo. O que for cadastrado aqui prevalece sobre a relação oficial. Colunas para colar: <b>CEST; NCM; Descrição; MVA original; MVA 4%; MVA 7%; MVA 12%; Fonte</b>.</div>
           <textarea id="mva-paste" rows="3" placeholder="17.003.00	1806.32.10	Chocolate em barras…	53,23	77,23	71,69	62,46	Subanexo I, item …"></textarea>
           <div class="row"><button class="btn sm primary" type="button" data-act="mva-import">${ic('plus')} Importar colagem</button></div>
         </div>
@@ -906,7 +979,7 @@
         <div class="table-wrap"><table class="data"><thead><tr><th>CEST / NCM</th><th>Exemplo de produto</th><th class="num">Itens</th><th>MVA ajustada aplicada (alíq. inter.)</th><th>MVA original equivalente</th><th></th></tr></thead><tbody>
           ${obs.length ? obs.map(o => `<tr><td class="small nowrap">${h(o.cest ? U.fmtCEST(o.cest) : '—')}<div class="sub">${h(o.ncms.map(U.fmtNCM).join(', '))}</div></td><td class="small">${h(o.ex)}</td><td class="num">${o.n}</td><td class="small">${h(o.ajs.join(' · '))}</td>
             <td class="small">${o.clusters.length > 1 ? `<span class="pill moderada">divergente</span> ${h(o.clusters.map(v => U.pct(v)).join(' × '))}` : U.pct(o.clusters[0])}</td>
-            <td>${o.temTab ? '<span class="pill ok">na tabela</span>' : `<button class="btn sm" type="button" data-act="mva-from-obs" data-key="${h(o.key)}" ${o.clusters.length > 1 ? 'title="Valores divergentes: será usado o menor — confirme no Subanexo I"' : ''}>Usar como referência</button>`}</td></tr>`).join('') : '<tr class="empty-row"><td colspan="6">Importe memórias de cálculo do ST para ver as MVAs aplicadas.</td></tr>'}
+            <td>${o.temTab ? '<span class="pill ok">com referência</span>' : `<button class="btn sm" type="button" data-act="mva-from-obs" data-key="${h(o.key)}" ${o.clusters.length > 1 ? 'title="Valores divergentes: será usado o menor — confirme no Subanexo I"' : ''}>Usar como referência</button>`}</td></tr>`).join('') : '<tr class="empty-row"><td colspan="6">Importe memórias de cálculo do ST para ver as MVAs aplicadas.</td></tr>'}
         </tbody></table></div>
       </div>
 
@@ -990,6 +1063,8 @@
           <li>Abra <b>Revisão</b>: filtre, confira cada achado, ajuste a destinação dos produtos e marque o status.</li>
           <li>Gere o <b>Excel</b> (com base legal e fundamentação), o <b>requerimento</b> (Word/PDF) e a <b>lista para o e-Fazenda</b>.</li>
         </ol>
+        <h3>Relação oficial de mercadorias com ST</h3>
+        <p>O app traz a relação do <b>Subanexo I do Anexo III do RICMS/MS</b> (CEST, NCM, descrição e MVA original e ajustada a 4%, 7% e 12%). Com ela, confere a MVA aplicada pela SEFAZ em cada item de ST, aponta mercadoria fora da lista e mostra a descrição oficial para comparar com o produto. Item sem CEST na nota é procurado pelo NCM, valendo o item de classificação mais específica. Para usar uma versão mais nova, salve o Subanexo como .docx no Word e importe em <i>Tabelas e regras</i>.</p>
         <h3>O pedido na SEFAZ/MS</h3>
         <p>Pela Resolução SEFAZ nº 3.033/2019, o optante pelo Simples Nacional pede a revisão eletrônica no e-Fazenda (módulo Informações Fiscais). É <b>um pedido por mês de referência e por tributo</b> — por isso o sistema consolida tudo antes. Até o vencimento, as NFs contestadas ficam desvinculadas até a decisão (15 dias úteis). Depois, use o e-SAP (nova revisão, reconsideração ou restituição — Res. SEFAZ nº 3.426/2025).</p>
         <h3>Dica para o Simples Nacional</h3>
@@ -1178,6 +1253,11 @@
     'mva-add': () => { App.state.mvaTable.push({ id: U.uid(), cest: '', ncm: '', descricao: '', mvaOriginal: '', mva4: '', mva7: '', mva12: '', fonte: 'Informado pelo usuário' }); commit(); },
     'mva-rm': el => { App.state.mvaTable.splice(+el.dataset.idx, 1); commit(); },
     'mva-clear': () => { if (global.confirm('Apagar toda a tabela de MVA?')) { App.state.mvaTable = []; commit(); } },
+    'sub-importar': () => importarSubanexo(),
+    'sub-padrao': () => {
+      if (!global.confirm('Voltar a usar a versão da relação oficial que acompanha o app?')) return;
+      delete App.state.subanexo; commit(); toast('Usando a versão da relação que acompanha o app.', 'ok');
+    },
     'mva-import': () => {
       const rows = parseMvaPaste($('#mva-paste').value);
       if (!rows.length) return toast('Não encontrei linhas com CEST ou NCM na colagem.', 'err');
@@ -1281,9 +1361,11 @@
     if (t.id === 'scope-ref') { App.ui.ref = t.value; App.sel.clear(); savePrefs(); return renderAll(); }
   }
 
+  const subBuscaDebounced = U.debounce(v => { App.ui.subQ = v; const box = $('#sub-res'); if (box) box.innerHTML = subResultados(); }, 200);
   function onInput(e) {
     const t = e.target;
     if (t.matches('[data-f]') && (t.type === 'search' || t.type === 'text')) setFilterDebounced(t);
+    if (t.id === 'sub-q') subBuscaDebounced(t.value);
   }
 
   function bind() {

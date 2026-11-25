@@ -7,6 +7,7 @@ Ferramenta web para **revisar as cobranças de ICMS-ST (tributo 333) e de ICMS E
 - confere **item a item** as memórias de cálculo de cada nota fiscal;
 - encontra **duplicidade do mesmo produto da mesma NF cobrado como ST e como Equalização**, além de NF cobrada em dois meses, linha repetida e ST já retido pelo fornecedor;
 - aponta erros de cálculo, crédito a menor, MVA divergente, item sem CEST, percentual de Equalização errado, insumos e itens de uso e consumo tributados como ST, isenção de ME etc.;
+- confere a MVA de cada item de ST com a **relação oficial do Subanexo I do Anexo III do RICMS/MS** (embutida no app) e aponta mercadoria fora da lista de ST;
 - gera o **relatório consolidado** (Excel) com as colunas **Base legal** e **Fundamentação**, o **requerimento** pronto (Word/PDF) e a **lista de NFs para o pedido no e-Fazenda**;
 - guarda o cadastro das empresas com as **atividades (CNAE) do cartão CNPJ**.
 
@@ -45,13 +46,23 @@ O valor a revisar é **consolidado sem dupla contagem**: um item nunca é contes
 | NF de outro destinatário (XML) | Res. SEFAZ 3.033/2019 |
 | NF devolvida, cancelada ou não recebida | LC 87/1996, art. 12; CTN, art. 114; Ajuste SINIEF 07/2005 |
 | Erro de cálculo do ICMS-ST / crédito a menor | LC 87/1996, art. 8º, § 5º; CF, art. 155, § 2º, I; Conv. 142/2018, cl. 13ª |
-| MVA acima da tabela / divergente para o mesmo produto | LC 87/1996, art. 8º, II, "c"; RICMS/MS, Anexo III, Subanexo I |
-| Item de ST sem CEST / fora da lista de ST | Conv. ICMS 142/2018, cláusula 7ª |
+| MVA acima da prevista no Subanexo I / divergente para o mesmo produto | LC 87/1996, art. 8º, II, "c"; RICMS/MS, Anexo III, Subanexo I |
+| Item de ST sem CEST / fora da relação do Subanexo I | Conv. ICMS 142/2018, cláusula 7ª; RICMS/MS, Anexo III, Subanexo I |
 | Insumo (lanchonete/indústria) e uso e consumo, brinde ou degustação tributados como ST | CF, art. 150, § 7º; LC 87/1996, art. 10; Conv. 142/2018, cl. 9ª e 12ª–13ª; Dec. 15.055/2018 |
 | Percentual de Equalização incorreto | Dec. 15.055/2018, art. 5º; Res. SF 22/1989 e 13/2012 |
 | ME isenta da Equalização / MEI dispensado | Dec. 16.177/2023, art. 1º, III; Dec. 13.115/2011 |
 
 A lista completa, com o texto de cada norma, está na tela **Como usar** e na aba **Base legal** do Excel.
+
+## Relação oficial do Subanexo I (RICMS/MS)
+
+O app traz a relação das mercadorias sujeitas à ST em MS — **Subanexo I do Anexo III do RICMS/MS**: 941 itens em 24 segmentos, com CEST, NCM, descrição e MVA original e ajustada (4%, 7% e 12%). É a versão obtida em 25/11/2026, com alterações até o Decreto nº 16.801/2026; só a redação em vigor é usada, sem as redações anteriores.
+
+- **Conferência da MVA:** o item é localizado pelo CEST da nota. Sem CEST, é localizado pelo NCM, valendo o item de classificação mais específica (ex.: "7013.37.00 – outros copos" prevalece sobre "7013 – objetos de vidro"). Onde a relação traz duas tabelas, como bebidas por protocolo ou por tipo de remetente, vale a maior MVA.
+- **Fora da lista:** quando nem o CEST nem o NCM constam da relação, o item é apontado como fora da ST.
+- **Consulta:** em *Tabelas e regras*, pesquise por NCM, CEST ou palavras da descrição.
+- **Atualizar:** baixe o Subanexo I no site da SEFAZ/MS, abra no Word e salve como `.docx`. Depois use *Tabelas e regras → Atualizar com nova versão*.
+- **Ajustes:** a sua tabela de MVA, na mesma tela, prevalece sobre a relação.
 
 ## O pedido na SEFAZ/MS
 
@@ -97,6 +108,8 @@ assets/js/util.js       utilitários (números, datas, CNPJ, NCM…)
 assets/js/pdftext.js    extração de texto dos PDFs (pdf.js)
 assets/js/parsers.js    leitura: prévia, "Dados da Nota", memória ST, cartão CNPJ, XML
 assets/js/legal.js      base legal e catálogo de checagens
+assets/js/subanexo.js   leitura e consulta da relação oficial (Subanexo I)
+assets/data/subanexo1-ms.js  relação oficial do Subanexo I (dados)
 assets/js/engine.js     vínculos, conferências e regras de revisão
 assets/js/reports.js    Excel, requerimento, lista e-Fazenda, produtos com ST
 assets/js/store.js      armazenamento local (IndexedDB) e backup

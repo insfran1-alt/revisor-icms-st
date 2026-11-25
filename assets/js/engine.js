@@ -9,7 +9,7 @@
     degustacao: ['DEGUSTACAO', 'AMOSTRA', 'BRINDE', 'CORTESIA'],
     uso_consumo: ['DISPLAY', 'EXPOSITOR', 'CARTAZ', 'FAIXA DE GONDOLA', 'REGUA DE GONDOLA', 'BANNER', 'ADESIVO', 'UNIFORME', 'AVENTAL', 'MATERIAL DE LIMPEZA', 'USO E CONSUMO', 'MATERIAL PROMOCIONAL']
   };
-  const DEFAULT_SETTINGS = { aliqInterna: 17, tolerancia: 0.05, difalMetodo: 'por_dentro', tabelaSTCompleta: false, outrosLimitePct: 30, keywords: DEFAULT_KEYWORDS };
+  const DEFAULT_SETTINGS = { aliqInterna: 17, tolerancia: 0.05, difalMetodo: 'por_dentro', tabelaSTCompleta: false, usarSubanexo: true, outrosLimitePct: 30, keywords: DEFAULT_KEYWORDS };
   const ORIGEM_IMPORTADA = ['1', '2', '3', '8'];
 
   const brl = U.brl, pct = v => U.fmt(v, 2) + '%';
@@ -114,7 +114,26 @@
     return best;
   }
 
+  /** Referência de MVA a partir da relação oficial (Subanexo I). Pelo CEST, o item da nota; sem CEST, os itens de NCM mais
+   *  específico. Havendo mais de um, vale a maior MVA entre eles; "todos" guarda a maior MVA entre todos os itens possíveis. */
+  function refOficial(o) {
+    const temMva = c => c.mva !== undefined && c.mva !== null;
+    const todos = o.cands.filter(temMva);
+    if (!todos.length) return null;
+    const esp = (o.especificos || []).filter(temMva);
+    const base = esp.length ? esp : todos;
+    const maior = (lst, k) => { const v = lst.map(c => c[k]).filter(x => x !== undefined && x !== null); return v.length ? Math.max(...v) : null; };
+    const nomes = base.map(c => `item ${c.item} (CEST ${U.fmtCEST(c.cest)}${c.cond ? `; ${c.cond}` : ''})`);
+    const ref = {
+      oficial: true, por: o.por, itens: base, mvaOriginal: maior(base, 'mva'), mva4: maior(base, 'mva4'), mva7: maior(base, 'mva7'), mva12: maior(base, 'mva12'),
+      fonte: `RICMS/MS, Anexo III, Subanexo I, ${base.length > 1 ? `${nomes.join(', ')} — considerada a maior MVA entre eles` : nomes[0]}`
+    };
+    if (base.length < todos.length) ref.todos = { mvaOriginal: maior(todos, 'mva'), mva4: maior(todos, 'mva4'), mva7: maior(todos, 'mva7'), mva12: maior(todos, 'mva12'), n: todos.length };
+    return ref;
+  }
+
   function mvaParaAliq(e, aInter, aIntra) {
+    if (aInter === 0 && e.mvaOriginal !== null && e.mvaOriginal !== undefined && e.mvaOriginal !== '') return +e.mvaOriginal; // operação interna
     const col = aInter === 4 ? 'mva4' : aInter === 7 ? 'mva7' : aInter === 12 ? 'mva12' : null;
     const v = col ? e[col] : null;
     if (v !== null && v !== undefined && v !== '' && !isNaN(+v)) return +v;
@@ -220,6 +239,9 @@
     const docs = state.docs || [];
     const catalog = state.catalog || {};
     const mvaTable = state.mvaTable || [];
+    // relação oficial do Subanexo I: versão importada pelo usuário ou a que acompanha o app
+    const SUB = global.RST_SUB;
+    const sub = S.usarSubanexo !== false && SUB ? ((state.subanexo && state.subanexo.itens) ? state.subanexo : (global.RST_SUBANEXO_PADRAO || null)) : null;
     const decisions = state.decisions || {};
     const noteFlags = state.noteFlags || {};
     const onlyCompany = companies.size === 1 ? [...companies.keys()][0] : null;
@@ -372,8 +394,12 @@
           it.icmsCalc = U.round2(U.round2((it.bcST || 0) * it.aliqIntra / 100) - (it.credito || 0));
           it.base = custo;
           it.dest = resolveDestinacao(catalog, it, S);
+          // referência de MVA: a tabela do usuário prevalece; sem ela, a relação oficial (Subanexo I)
           it.mvaRef = findMva(mvaTable, it);
+          it.oficial = sub ? SUB.buscarItem(sub, it.cest || it.cestXml, it.ncm) : null;
+          if (!it.mvaRef && it.oficial && it.oficial.cands.length) it.mvaRef = refOficial(it.oficial);
           it.mvaTab = it.mvaRef ? mvaParaAliq(it.mvaRef, it.aliqInter, it.aliqIntra) : null;
+          it.mvaTabTodos = it.mvaRef && it.mvaRef.todos ? mvaParaAliq(it.mvaRef.todos, it.aliqInter, it.aliqIntra) : it.mvaTab;
         } else {
           it.base = U.round2((it.valorTotal || 0) + (it.frete || 0) + (it.seguro || 0) + (it.ipi || 0) + (it.outros || 0) - (it.desconto || 0));
           it.icmsCalc = U.round2(it.base * (it.percentual || 0) / 100);
@@ -560,22 +586,38 @@
             const bc = U.round2((it.custoFinal || 0) * (1 + it.mvaTab / 100));
             const calc = U.round2(U.round2(bc * it.aliqIntra / 100) - (it.credito || 0));
             const dif = U.round2((it.icms || 0) - calc);
+            // sem CEST, a referência é o item de NCM mais específico; se a MVA aplicada não supera a de todos os itens
+            // possíveis para o NCM, o pedido depende de o produto corresponder ao item específico (moderada)
+            const pelaNcm = !!(it.mvaRef.oficial && it.mvaRef.por === 'ncm' && it.mvaRef.todos);
+            const acimaDeTodos = !pelaNcm || it.mvaTabTodos === null || it.mvaTabTodos === undefined || it.mvaAj > it.mvaTabTodos + 0.05;
             if (dif > tol) add('ST_MVA_TAB', ch, it, { revisar: dif, devido: calc }, {
-              resumo: `MVA aplicada ${pct(it.mvaAj)} > tabela ${pct(it.mvaTab)}.`,
-              fund: `A base de cálculo do ICMS-ST do item ${itTxt(it)} da ${nfTxt(ch)} foi apurada com MVA ajustada de ${pct(it.mvaAj)}, superior à MVA de ${pct(it.mvaTab)} prevista para a mercadoria${it.mvaRef.fonte ? ` (${it.mvaRef.fonte})` : ''} nas operações interestaduais a ${pct(it.aliqInter)}. Pela LC nº 87/1996, art. 8º, II, "c", e § 4º, a margem deve observar a legislação (RICMS/MS, Anexo III, Subanexo I). Recalculada a base (${brl(bc)}), o imposto devido é ${brl(calc)}; requer-se a exclusão da diferença de ${brl(dif)}.`
-            });
+              resumo: `MVA aplicada ${pct(it.mvaAj)} > ${it.mvaRef.oficial ? 'Subanexo I' : 'tabela'} ${pct(it.mvaTab)}.${acimaDeTodos ? '' : ` Sem CEST na nota: vale se o produto corresponder ao item de NCM específico (itens genéricos do NCM chegam a ${pct(it.mvaTabTodos)}).`}`,
+              fund: `A base de cálculo do ICMS-ST do item ${itTxt(it)} da ${nfTxt(ch)} foi apurada com MVA ajustada de ${pct(it.mvaAj)}, superior à MVA de ${pct(it.mvaTab)} prevista para a mercadoria${it.mvaRef.fonte ? ` (${it.mvaRef.fonte})` : ''} nas operações interestaduais a ${pct(it.aliqInter)}.${acimaDeTodos ? '' : ` A nota não informa o CEST; pelo NCM ${U.fmtNCM(it.ncm)}, o produto corresponde ao item de classificação específica da relação, que prevalece sobre os itens de descrição genérica (estes com MVA de até ${pct(it.mvaTabTodos)}).`} Pela LC nº 87/1996, art. 8º, II, "c", e § 4º, a margem deve observar a legislação (RICMS/MS, Anexo III, Subanexo I). Recalculada a base (${brl(bc)}), o imposto devido é ${brl(calc)}; requer-se a exclusão da diferença de ${brl(dif)}.`
+            }, { forca: acimaDeTodos ? 'forte' : 'moderada' });
           }
+          const semCest = !U.digits(it.cest) || /^0+$/.test(U.digits(it.cest));
+          // fora da relação oficial: nem o CEST nem o NCM (completo, 8 dígitos) constam do Subanexo I — e o usuário não cadastrou o item
+          const foraOficial = !!(it.oficial && !it.oficial.cands.length && U.digits(it.ncm).length === 8 && !findMva(mvaTable, it));
           // Sem CEST
-          if (!U.digits(it.cest) || /^0+$/.test(U.digits(it.cest))) {
-            add('ST_SEM_CEST', ch, it, { revisar: it.icms }, {
+          if (semCest && !foraOficial) {
+            const naLista = !!(it.oficial && it.oficial.cands.length);
+            const exLista = naLista ? it.oficial.cands.slice(0, 3).map(c => `item ${c.item} (CEST ${U.fmtCEST(c.cest)}) — ${c.desc}`).join('; ') + (it.oficial.cands.length > 3 ? `; e mais ${it.oficial.cands.length - 3}` : '') : '';
+            add('ST_SEM_CEST', ch, it, { revisar: it.icms }, naLista ? {
+              resumo: `NF sem CEST; o NCM ${U.fmtNCM(it.ncm)} aparece no Subanexo I — confira se o produto corresponde à descrição oficial.`,
+              fund: `O item ${itTxt(it)} da ${nfTxt(ch)} foi submetido ao ICMS-ST sem que a nota informasse o CEST. O NCM ${U.fmtNCM(it.ncm)} aparece na relação do Subanexo I do Anexo III do RICMS/MS em: ${exLista}. A substituição tributária alcança apenas os bens que correspondam ao CEST, ao NCM/SH e à descrição da relação (Convênio ICMS 142/2018, cláusula sétima, caput e §§ 1º e 5º): coincidir o NCM não basta. Verificado que o produto não corresponde a nenhuma dessas descrições, requer-se a exclusão do item da cobrança, no valor de ${brl(it.icms)}.`
+            } : {
               resumo: `NF sem CEST para o item${it.cestXml ? ` (XML: ${U.fmtCEST(it.cestXml)})` : ''} — conferir enquadramento na ST.`,
               fund: `O item ${itTxt(it)} da ${nfTxt(ch)} foi submetido ao ICMS-ST sem que a nota informasse o CEST. A substituição tributária alcança apenas os bens identificados nos Anexos do Convênio ICMS 142/2018 e reproduzidos na legislação estadual pelo CEST, NCM/SH e descrição (cláusula sétima, caput e §§ 1º e 5º); se a descrição do produto não corresponder à de item da relação, a ST não se aplica. Verificado que o produto não corresponde a nenhum item do Subanexo I do Anexo III do RICMS/MS, requer-se a exclusão do item da cobrança, no valor de ${brl(it.icms)}.`
-            });
+            }, naLista ? { forca: 'atencao' } : {});
           }
-          // Fora da tabela de ST (quando a tabela cadastrada é completa)
-          if (S.tabelaSTCompleta && mvaTable.length && !it.mvaRef) {
+          // Fora da relação de ST: relação oficial (Subanexo I) ou, sem ela, tabela do usuário marcada como completa
+          const foraUsuario = !sub && S.tabelaSTCompleta && mvaTable.length && !it.mvaRef;
+          if (foraOficial || foraUsuario) {
             const eqDev = me.status === 'isenta' ? 0 : U.round2((it.custoFinal || 0) * Math.max(0, aIntra - (it.aliqInter || 7)) / 100);
-            add('ST_FORA_TAB', ch, it, { revisar: U.round2(it.icms - eqDev), devido: eqDev }, {
+            add('ST_FORA_TAB', ch, it, { revisar: U.round2(it.icms - eqDev), devido: eqDev }, foraOficial ? {
+              resumo: `${semCest ? 'Sem CEST, e o NCM' : `CEST ${U.fmtCEST(it.cest)} e NCM`} ${U.fmtNCM(it.ncm)} fora da relação do Subanexo I.`,
+              fund: `O item ${itTxt(it)} da ${nfTxt(ch)} não consta da relação de mercadorias sujeitas à substituição tributária em MS — RICMS/MS, Anexo III, Subanexo I${sub.ultimoDecreto ? ` (redação com alterações até o ${sub.ultimoDecreto})` : ''}: ${semCest ? 'a nota não informa o CEST e' : `o CEST ${U.fmtCEST(it.cest)} informado na nota não consta da relação e`} nenhum item da relação abrange o NCM ${U.fmtNCM(it.ncm)}. Ausente o enquadramento na legislação estadual e nos Anexos do Convênio ICMS 142/2018 (cláusula sétima), não há fundamento para a exigência do ICMS-ST. Requer-se a exclusão do item da cobrança, sujeitando-se a mercadoria apenas à Equalização (${brl(eqDev)}, Decreto nº 15.055/2018); valor a revisar: ${brl(it.icms - eqDev)}.`
+            } : {
               resumo: `NCM/CEST não consta na tabela de ST cadastrada.`,
               fund: `O item ${itTxt(it)} da ${nfTxt(ch)} não consta da relação de mercadorias sujeitas à substituição tributária em MS (RICMS/MS, Anexo III, Subanexo I, conforme tabela cadastrada). Ausente o enquadramento na legislação estadual e nos Anexos do Convênio ICMS 142/2018 (cláusula sétima), não há fundamento para a exigência do ICMS-ST. Requer-se a exclusão do item da cobrança, sujeitando-se a mercadoria apenas à Equalização (${brl(eqDev)}, Decreto nº 15.055/2018); valor a revisar: ${brl(it.icms - eqDev)}.`
             });
@@ -759,7 +801,7 @@
       if (!c.porte) pend.push({ tipo: 'sem_porte', nivel: 'info', companyId: c.id, texto: `${c.nomeFantasia || c.razaoSocial || 'Empresa'}: porte não informado (ME/EPP/MEI).` });
     });
     const semTab = items.filter(i => i.tipo === 'ST' && !i.mvaRef).length;
-    if (semTab && !mvaTable.length) pend.push({ tipo: 'sem_tabela', nivel: 'info', texto: `${semTab} itens de ST sem MVA de referência cadastrada — a conferência de MVA usa a coerência entre notas. Cadastre a tabela em "Tabelas e regras".` });
+    if (semTab && !mvaTable.length && !sub) pend.push({ tipo: 'sem_tabela', nivel: 'info', texto: `${semTab} itens de ST sem MVA de referência cadastrada — a conferência de MVA usa a coerência entre notas. Cadastre a tabela em "Tabelas e regras".` });
 
     /* 9. Estatísticas por empresa × referência */
     const stats = new Map();
@@ -783,7 +825,7 @@
 
     return {
       S, companies, charges, chargesById, items, itemsById, nfs: [...nfs.values()], nfsByKey: nfs, findings,
-      findingsById: new Map(findings.map(f => [f.id, f])), pend, stats: [...stats.values()], refs, docCharge
+      findingsById: new Map(findings.map(f => [f.id, f])), pend, stats: [...stats.values()], refs, docCharge, subanexo: sub
     };
   }
 

@@ -48,7 +48,8 @@
     if (d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
     return s || '';
   };
-  U.fmtNCM = s => { const d = U.digits(s); return d.length === 8 ? d.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1.$2.$3') : d; };
+  /** NCM com pontos; códigos parciais (posição/subposição) também: "830120" → "8301.20", "8517123" → "8517.12.3". */
+  U.fmtNCM = s => { const d = U.digits(s); return d.length > 4 && d.length <= 8 ? d.slice(0, 4) + '.' + d.slice(4, 6) + (d.length > 6 ? '.' + d.slice(6) : '') : d; };
   U.fmtCEST = s => { const d = U.digits(s); return d.length === 7 ? d.replace(/^(\d{2})(\d{3})(\d{2})$/, '$1.$2.$3') : ''; };
   U.fmtCNAE = s => { const d = U.digits(s); return d.length === 7 ? d.replace(/^(\d{2})(\d{2})(\d)(\d{2})$/, '$1.$2-$3-$4') : s || ''; };
 
