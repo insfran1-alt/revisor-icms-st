@@ -15,6 +15,7 @@
     const all = base.match(/\d{3,9}/g) || [];
     return all.length ? String(+all[0]) : '';
   }
+  const numerosDoNome = name => (String(name || '').replace(/\.[^.]+$/, '').match(/\d+/g) || []).map(x => String(+x));
 
   /* ============================================================
    * Cartão CNPJ (Comprovante de Inscrição e de Situação Cadastral — RFB)
@@ -149,27 +150,17 @@
   }
 
   /* ============================================================
-   * "Dados da Nota" (detalhe por item exibido no portal — Equalização)
+   * "Dados da Nota" — tela do portal com os itens da NF (Equalização), em páginas de 15 itens
+   * ("Visualizando 1 - 15 de 85"). Chega em PDF (uma página por arquivo ou várias num só),
+   * em planilha (páginas coladas uma abaixo da outra) ou colada direto no app.
+   * As páginas da mesma NF são juntadas pela numeração.
    * ============================================================ */
-  function parseDadosNotaBlocks(pdf) {
-    const allLines = [];
-    pdf.pages.forEach(p => p.lines.forEach(l => allLines.push(l)));
-    // separa em blocos por "Chave de Acesso"
-    const blocks = [];
-    let cur = null;
-    allLines.forEach(l => {
-      if (/Chave de Acesso/i.test(l.text)) { cur = { lines: [] }; blocks.push(cur); }
-      if (!cur) { cur = { lines: [] }; blocks.push(cur); }
-      cur.lines.push(l);
-    });
-    return blocks.filter(b => b.lines.some(l => /Chave de Acesso|N[úu]mero da Nota/i.test(l.text)))
-      .map(b => parseDadosNotaBlock(b.lines));
-  }
+  const VIS_RE = /Visualizando\s+(\d+)\s*-\s*(\d+)\s+de\s+(\d+)/i;
+  const META_RE = /Chave de Acesso|N[úu]mero da Nota|CPF\/CNPJ Remetente|Data da Emiss[ãa]o|Valor da Nota|Valor do ICMS/i;
+  const notaVazia = () => ({ numero: '', chave: '', cnpjRemetente: '', ufRemetente: '', dataEmissao: '', valorNF: 0, valorICMS: 0 });
 
-  function parseDadosNotaBlock(blockLines) {
-    const warnings = [];
-    const text = blockLines.map(l => l.text).join('\n');
-    const flat = text.replace(/\n/g, ' ');
+  /** Dados da NF no cabeçalho da tela "Dados da Nota". */
+  function notaDoTexto(flat) {
     const nota = {
       chave: U.digits(rx(flat, /Chave de Acesso:?\s*([\d ]{44,60})/i)).slice(0, 44),
       numero: String(+U.digits(rx(flat, /N[úu]mero da Nota:?\s*(\d+)/i)) || ''),
@@ -179,29 +170,121 @@
       valorNF: U.num(rx(flat, /Valor da Nota R\$:?\s*(-?[\d.]*\d,\d{2})/i)),
       valorICMS: U.num(rx(flat, /Valor do ICMS R\$:?\s*(-?[\d.]*\d,\d{2})/i))
     };
-    if (nota.chave && nota.chave.length === 44) {
-      const ck = U.parseChave(nota.chave);
-      if (ck) {
-        if (!nota.numero) nota.numero = ck.numero;
-        if (!nota.cnpjRemetente) nota.cnpjRemetente = ck.cnpj;
-        if (!nota.ufRemetente) nota.ufRemetente = ck.uf;
-      }
+    const ck = nota.chave.length === 44 ? U.parseChave(nota.chave) : null;
+    if (ck) {
+      if (!nota.numero) nota.numero = ck.numero;
+      if (!nota.cnpjRemetente) nota.cnpjRemetente = ck.cnpj;
+      if (!nota.ufRemetente) nota.ufRemetente = ck.uf;
     }
+    return nota;
+  }
+
+  /** Junta as páginas de uma NF: ordena pela numeração, ignora página repetida, marca a posição de cada item e aponta o que falta. */
+  function juntarPaginas(paginas, warnings, avisarFaltantes) {
+    const comVis = paginas.filter(p => p.vis).sort((a, b) => a.vis.de - b.vis.de);
+    const semVis = paginas.filter(p => !p.vis);
+    const vezes = new Map();
+    const usadas = [];
+    comVis.forEach(p => {
+      const k = `${p.vis.de}–${p.vis.ate}`;
+      vezes.set(k, (vezes.get(k) || 0) + 1);
+      if (vezes.get(k) === 1) usadas.push(p);
+    });
+    vezes.forEach((n, k) => { if (n > 1) warnings.push(`A página com os itens ${k} aparece ${n} vezes — foi considerada uma vez só.`); });
+    const total = comVis.reduce((m, p) => Math.max(m, p.vis.total || 0), 0);
+    const cobertos = new Set();
+    const linhas = [];
+    usadas.forEach(p => {
+      const esperado = p.vis.ate - p.vis.de + 1;
+      if (p.linhas.length !== esperado) warnings.push(`Página com os itens ${p.vis.de}–${p.vis.ate}: ${p.linhas.length} de ${esperado} itens lidos.`);
+      p.linhas.forEach((l, i) => {
+        const pos = p.vis.de + i;
+        if (pos <= p.vis.ate) {
+          if (cobertos.has(pos)) return; // item já lido em outra página (páginas sobrepostas)
+          cobertos.add(pos);
+          l.pos = pos;
+        }
+        linhas.push(l);
+      });
+    });
+    const semPos = [];
+    semVis.forEach(p => p.linhas.forEach(l => { linhas.push(l); semPos.push(l); }));
+    // página sem "Visualizando" (só o cabeçalho da tabela) junto de páginas numeradas: se a quantidade de itens
+    // fecha exatamente com o que falta, é a continuação da lista
+    if (total && semPos.length) {
+      const livres = [];
+      for (let i = 1; i <= total; i++) if (!cobertos.has(i)) livres.push(i);
+      if (livres.length === semPos.length) semPos.forEach((l, i) => { l.pos = livres[i]; cobertos.add(l.pos); });
+    }
+    if (total) linhas.sort((a, b) => (a.pos || 1e9) - (b.pos || 1e9));
+    linhas.forEach((l, i) => { l.seq = i + 1; });
+    const faltam = total ? U.faixasFaltantes(cobertos, total) : [];
+    if (avisarFaltantes && faltam.length && !semPos.length) {
+      warnings.push(`Faltam os itens ${U.listaTxt(faltam)} de ${total} — copie também as páginas que faltam da tela "Dados da Nota".`);
+    }
+    return { linhas, total, faltam, paginas: usadas.map(p => ({ de: p.vis.de, ate: p.vis.ate })) };
+  }
+
+  /** Agrupa as páginas por NF (pelo cabeçalho); página sem cabeçalho continua a NF anterior. */
+  function agruparPorNota(paginas) {
+    const grupos = [];
+    let ultimo = null;
+    paginas.forEach(p => {
+      const n = p.nota || notaVazia();
+      let g = null;
+      if (n.numero) {
+        g = grupos.find(x => x.nota.numero === n.numero && (!x.nota.cnpjRemetente || !n.cnpjRemetente || x.nota.cnpjRemetente === n.cnpjRemetente)) || null;
+        if (!g && ultimo && !ultimo.nota.numero) g = ultimo;
+      } else g = ultimo;
+      if (!g) { g = { nota: notaVazia(), paginas: [] }; grupos.push(g); }
+      Object.keys(n).forEach(k => { if (!g.nota[k] && n[k]) g.nota[k] = n[k]; });
+      g.paginas.push(p);
+      ultimo = g;
+    });
+    return grupos;
+  }
+
+  /** Um resultado por NF: itens na ordem da tela, total de itens informado, páginas lidas e avisos. */
+  function montarNotas(paginas, origem) {
+    return agruparPorNota(paginas).map(g => {
+      const warnings = [];
+      const nota = g.nota;
+      const isEQ = g.paginas.some(p => p.isEQ);
+      const isST = !isEQ && g.paginas.some(p => p.isST);
+      const j = juntarPaginas(g.paginas, warnings, origem !== 'pdf');
+      const linhas = j.linhas;
+      if (!linhas.length) warnings.push('Nenhum item foi lido na tabela da nota.');
+      if (isEQ && linhas.some(x => x.ncmTruncado)) warnings.push('NCM com 7 dígitos (cortado na tela ou na impressão) — a comparação usará o prefixo do NCM.');
+      if (isST && linhas.some(l => !('icms' in l))) warnings.push('Coluna "ICMS A RECOLHER" não encontrada.');
+      const soma = U.round2(U.sum(linhas, x => x.icms));
+      // tolerância de arredondamento: cada item vem arredondado ao centavo
+      if (nota.valorICMS && linhas.length && !j.faltam.length && Math.abs(soma - nota.valorICMS) > Math.max(0.05, linhas.length * 0.003)) {
+        warnings.push(`Soma do ICMS dos itens (${U.brl(soma)}) difere do ICMS da nota (${U.brl(nota.valorICMS)}).`);
+      }
+      const comCabecalho = !!(nota.numero || nota.chave);
+      const formato = isEQ ? (comCabecalho ? 'EQ_DADOS_NOTA' : 'EQ_TABELA') : isST ? 'ST_TABELA' : 'DADOS_NOTA';
+      return { formato, tipo: isEQ ? 'EQ' : isST ? 'ST' : null, nota, linhas, totalLinhasDeclarado: j.total, paginas: j.paginas, warnings };
+    });
+  }
+
+  /** Uma página impressa da tela "Dados da Nota" (PDF). */
+  function paginaDoPDF(blockLines) {
+    const text = blockLines.map(l => l.text).join('\n');
+    const flat = text.replace(/\n/g, ' ');
+    const nota = notaDoTexto(flat);
     const headerIdx = blockLines.findIndex(l => /^NCM\b/i.test(l.text) && /Descri/i.test(l.text));
     const headerText = headerIdx >= 0 ? U.norm(blockLines[headerIdx].text) : '';
-    const formatoEQ = /PERCENTU/.test(headerText);
-    if (headerIdx >= 0 && !formatoEQ && /MVA|CUSTO|RECOLHER|BC ICMS/.test(headerText)) {
+    const isEQ = /PERCENTU/.test(headerText);
+    if (headerIdx >= 0 && !isEQ && /MVA|CUSTO|RECOLHER|BC ICMS/.test(headerText)) {
       // memória do ICMS-ST impressa em PDF: layout com dezenas de colunas — a leitura por PDF não é confiável
-      return { kind: 'desconhecido', data: { nota }, warnings: [`NF ${nota.numero || '?'}: memória do ICMS-ST em PDF não é lida com segurança. Copie a tabela no portal e use "Colar a tabela do portal" (ou salve em planilha).`] };
+      return { erro: { kind: 'desconhecido', data: { nota }, warnings: [`NF ${nota.numero || '?'}: memória do ICMS-ST em PDF não é lida com segurança. Copie a tabela no portal e use "Colar a tabela do portal" (ou salve em planilha).`] } };
     }
+    const v = flat.match(VIS_RE);
     const linhas = [];
-    let declarado = 0;
-    const vis = flat.match(/Visualizando\s+\d+\s*-\s*\d+\s+de\s+(\d+)/i);
-    if (vis) declarado = +vis[1];
     if (headerIdx >= 0) {
       for (let i = headerIdx + 1; i < blockLines.length; i++) {
         const l = blockLines[i];
-        if (/^Visualizando/i.test(l.text)) continue;
+        if (VIS_RE.test(l.text)) continue;
         const m = l.text.match(/^(.*?)((?:\s*-?[\d.]*\d,\d{2,4}){8})\s*$/);
         if (!m) continue;
         const nums = m[2].trim().split(/\s+/).map(U.num);
@@ -211,23 +294,39 @@
         if (/^\d{4,8}$/.test(first)) { ncm = first; desc = left.slice(first.length).trim(); }
         else { const mm = left.match(/^(\d{8})\s*(.*)$/) || left.match(/^(\d{7})\s*(\D.*)$/); if (mm) { ncm = mm[1]; desc = mm[2].trim(); } }
         linhas.push({
-          seq: linhas.length + 1, ncm, ncmTruncado: ncm.length > 0 && ncm.length < 8, descricao: desc,
+          ncm, ncmTruncado: ncm.length > 0 && ncm.length < 8, descricao: desc,
           valorTotal: nums[0], frete: nums[1], seguro: nums[2], ipi: nums[3], outros: nums[4], desconto: nums[5], percentual: nums[6], icms: nums[7]
         });
       }
     }
-    if (!linhas.length) warnings.push('Nenhum item foi lido na tabela da nota.');
-    if (declarado && declarado > linhas.length) warnings.push(`A página indica ${declarado} itens, mas ${linhas.length} foram lidos — imprima todas as páginas da lista de itens.`);
-    if (linhas.some(x => x.ncmTruncado)) warnings.push('NCM exibido com 7 dígitos (coluna cortada na impressão) — a comparação usará o prefixo do NCM.');
-    const somaICMS = U.round2(U.sum(linhas, x => x.icms));
-    if (nota.valorICMS && linhas.length && Math.abs(somaICMS - nota.valorICMS) > 0.05 && (!declarado || declarado === linhas.length)) {
-      warnings.push(`Soma do ICMS dos itens (${U.brl(somaICMS)}) difere do ICMS da nota (${U.brl(nota.valorICMS)}).`);
-    }
-    return { kind: 'itens', data: { formato: formatoEQ ? 'EQ_DADOS_NOTA' : 'DADOS_NOTA', tipo: formatoEQ ? 'EQ' : null, nota, totalLinhasDeclarado: declarado, linhas }, warnings };
+    return { nota, vis: v ? { de: +v[1], ate: +v[2], total: +v[3] } : null, linhas, isEQ, isST: false };
+  }
+
+  function parseDadosNotaBlocks(pdf) {
+    const allLines = [];
+    pdf.pages.forEach(p => p.lines.forEach(l => allLines.push(l)));
+    // separa em blocos por "Chave de Acesso" (cada página impressa repete o cabeçalho da NF)
+    const blocks = [];
+    let cur = null;
+    allLines.forEach(l => {
+      if (/Chave de Acesso/i.test(l.text)) { cur = { lines: [] }; blocks.push(cur); }
+      if (!cur) { cur = { lines: [] }; blocks.push(cur); }
+      cur.lines.push(l);
+    });
+    const erros = [], paginas = [];
+    blocks.filter(b => b.lines.some(l => /Chave de Acesso|N[úu]mero da Nota/i.test(l.text))).forEach(b => {
+      const p = paginaDoPDF(b.lines);
+      if (p.erro) erros.push(p.erro); else paginas.push(p);
+    });
+    return erros.concat(montarNotas(paginas, 'pdf').map(r => ({
+      kind: 'itens',
+      data: { formato: r.formato, tipo: r.tipo, nota: r.nota, totalLinhasDeclarado: r.totalLinhasDeclarado, paginas: r.paginas, linhas: r.linhas, numeroNoConteudo: !!r.nota.numero },
+      warnings: r.warnings
+    })));
   }
 
   /* ============================================================
-   * Tabelas (XLSX / CSV / texto colado do portal) — memória de cálculo ST e EQ
+   * Tabelas (planilha, CSV ou texto colado do portal) — memória de cálculo ST e EQ
    * ============================================================ */
   const ST_COLS = [
     [/^DESCRICAO/, 'descricao'], [/^NCM/, 'ncm'], [/^CEST/, 'cest'], [/GTIN|EAN/, 'gtin'],
@@ -265,47 +364,94 @@
     const ns = row.map(c => U.norm(c));
     return ns.some(c => /^DESCRICAO/.test(c)) && ns.some(c => /^NCM/.test(c));
   };
-
-  /** Converte linhas (array de arrays) numa memória de cálculo de itens (ST ou EQ). */
-  function parseTabelaItens(rows, origem) {
-    const warnings = [];
-    const hIdx = rows.findIndex(isHeaderRow);
-    if (hIdx < 0) return null;
-    const map = mapHeader(rows[hIdx]);
+  const ehNumero = v => typeof v === 'number' ? isFinite(v) : /^-?\(?(R\$)?\s*-?[\d.]*\d(,\d+)?%?\)?$/i.test(String(v ?? '').trim());
+  function tipoDoCabecalho(map) {
     const keys = Object.values(map);
     const isEQ = keys.includes('percentual') && !keys.includes('bcST') && !keys.includes('custoFinal');
-    const isST = keys.includes('icms') || keys.includes('bcST') || keys.includes('custoFinal');
-    if (!isEQ && !isST) return null;
-    const linhas = [];
-    for (let r = hIdx + 1; r < rows.length; r++) {
-      const row = rows[r];
-      if (!row || !row.some(c => String(c ?? '').trim())) continue;
-      if (isHeaderRow(row)) continue;
-      const o = {};
-      Object.entries(map).forEach(([idx, key]) => { o[key] = row[idx]; });
-      const desc = String(o.descricao ?? '').trim();
-      if (!desc || /^TOTA(L|IS)\b/i.test(U.norm(desc))) continue;
-      const item = { seq: linhas.length + 1, descricao: desc };
-      NUM_FIELDS.forEach(k => { if (k in o) item[k] = U.num(o[k]); });
-      ['ncm', 'cest', 'gtin', 'cst', 'cfop', 'un'].forEach(k => { if (k in o) item[k] = String(o[k] ?? '').trim(); });
-      item.ncm = U.digits(item.ncm);
-      item.cest = U.digits(item.cest);
-      if (isEQ) {
-        item.icms = item.icmsEq ?? item.icms ?? 0;
-        delete item.icmsEq;
-        item.ncmTruncado = item.ncm.length > 0 && item.ncm.length < 8;
-      } else {
-        if (!item.custoFinal && item.valorTotal) item.custoFinal = U.round2(item.valorTotal + (item.ipi || 0) + (item.frete || 0) + (item.seguro || 0) + (item.outros || 0) - (item.desconto || 0));
-        if (!item.bcProprio) item.bcProprio = item.valorTotal || 0;
-      }
-      linhas.push(item);
+    const isST = !isEQ && (keys.includes('icms') || keys.includes('bcST') || keys.includes('custoFinal'));
+    return { isEQ, isST };
+  }
+
+  /** Converte uma linha da tabela em item — ou null, se não for linha de item (cabeçalho da NF, paginação, total…). */
+  function itemDaLinha(row, map, isEQ) {
+    const o = {};
+    Object.entries(map).forEach(([idx, key]) => { o[key] = row[idx]; });
+    const desc = String(o.descricao ?? '').trim();
+    if (!desc || /^TOTA(L|IS)\b/.test(U.norm(desc))) return null;
+    const txt = row.map(c => String(c ?? '')).join('  ');
+    if (META_RE.test(txt) || VIS_RE.test(txt)) return null;
+    const comValor = isEQ ? ['valorTotal', 'icmsEq', 'icms'] : ['valorTotal', 'icms', 'bcST', 'custoFinal'];
+    if (!comValor.some(k => k in o && ehNumero(o[k]))) return null;
+    const item = { descricao: desc };
+    NUM_FIELDS.forEach(k => { if (k in o) item[k] = U.num(o[k]); });
+    ['ncm', 'cest', 'gtin', 'cst', 'cfop', 'un'].forEach(k => { if (k in o) item[k] = String(o[k] ?? '').trim(); });
+    // código gravado como número pela planilha perde o zero à esquerda
+    if (typeof o.ncm === 'number' && o.ncm > 0) item.ncm = String(o.ncm).padStart(8, '0');
+    if (typeof o.cest === 'number' && o.cest > 0) item.cest = String(o.cest).padStart(7, '0');
+    item.ncm = U.digits(item.ncm);
+    item.cest = U.digits(item.cest);
+    if (isEQ) {
+      item.icms = item.icmsEq ?? item.icms ?? 0;
+      delete item.icmsEq;
+      item.ncmTruncado = item.ncm.length > 0 && item.ncm.length < 8;
+    } else {
+      if (!item.custoFinal && item.valorTotal) item.custoFinal = U.round2(item.valorTotal + (item.ipi || 0) + (item.frete || 0) + (item.seguro || 0) + (item.outros || 0) - (item.desconto || 0));
+      if (!item.bcProprio) item.bcProprio = item.valorTotal || 0;
     }
-    if (!linhas.length) warnings.push('Nenhum item encontrado abaixo do cabeçalho.');
-    if (isST) {
-      const semIcms = linhas.filter(l => !('icms' in l));
-      if (semIcms.length) warnings.push('Coluna "ICMS A RECOLHER" não encontrada.');
-    }
-    return { formato: isEQ ? 'EQ_TABELA' : 'ST_TABELA', tipo: isEQ ? 'EQ' : 'ST', linhas, warnings, origem };
+    return item;
+  }
+
+  /** Separa as linhas em páginas: cabeçalho da NF, "Visualizando a - b de N", cabeçalho da tabela e itens. */
+  function paginasDeLinhas(rows) {
+    const paginas = [];
+    let cur = null;
+    const nova = () => {
+      const ant = cur;
+      cur = { meta: [], vis: null, map: ant ? ant.map : null, isEQ: ant ? ant.isEQ : false, isST: ant ? ant.isST : false, linhas: [] };
+      paginas.push(cur);
+    };
+    (rows || []).forEach(row => {
+      if (!Array.isArray(row)) return;
+      const cells = row.map(c => (typeof c === 'string' ? c.trim() : c));
+      const txt = cells.map(c => String(c ?? '').trim()).filter(Boolean).join('  ');
+      if (!txt) return;
+      const titulo = /^Dados da Nota$/i.test(txt);
+      const meta = META_RE.test(txt);
+      const vis = txt.match(VIS_RE);
+      const cab = isHeaderRow(cells);
+      if (!cur || ((titulo || meta || vis || cab) && cur.linhas.length)) nova();
+      if (titulo) return;
+      if (meta) { cur.meta.push(txt); return; }
+      if (vis) { cur.vis = { de: +vis[1], ate: +vis[2], total: +vis[3] }; return; }
+      if (cab) { cur.map = mapHeader(cells); Object.assign(cur, tipoDoCabecalho(cur.map)); return; }
+      if (!cur.map) return;
+      const item = itemDaLinha(cells, cur.map, cur.isEQ);
+      if (item) cur.linhas.push(item);
+    });
+    paginas.forEach(p => { p.nota = notaDoTexto(p.meta.join('  ')); });
+    return paginas.filter(p => p.map && (p.isEQ || p.isST));
+  }
+
+  /** Lê uma tabela (planilha, CSV ou colagem) e devolve um resultado por NF encontrada. */
+  function lerTabela(rows) {
+    return montarNotas(paginasDeLinhas(rows), 'tabela');
+  }
+  /** Primeira NF da tabela (ou null). */
+  function parseTabelaItens(rows) {
+    return lerTabela(rows)[0] || null;
+  }
+
+  function docDaTabela(r, numeroAlternativo, extra) {
+    const nota = Object.assign(notaVazia(), r.nota);
+    const numeroNoConteudo = !!nota.numero;
+    if (!nota.numero) nota.numero = numeroAlternativo || '';
+    const warnings = r.warnings.slice();
+    if (!nota.numero) warnings.push('Número da NF não identificado no nome do arquivo — informe-o no vínculo.');
+    return {
+      kind: 'itens',
+      data: Object.assign({ formato: r.formato, tipo: r.tipo, nota, linhas: r.linhas, totalLinhasDeclarado: r.totalLinhasDeclarado || 0, paginas: r.paginas || [], numeroNoConteudo }, extra || {}),
+      warnings
+    };
   }
 
   function parseCSVText(text) {
@@ -327,18 +473,19 @@
     return rows;
   }
 
-  /** Texto colado do portal (tabela copiada do navegador) */
+  /** Texto colado do portal (tabela copiada do navegador): um documento por NF encontrada. */
   function parseColagem(text, opts = {}) {
-    const rows = String(text || '').split(/\r?\n/).map(l => l.split('\t'));
-    let res = parseTabelaItens(rows, 'colagem');
-    if (!res) {
-      // tenta separar por 2+ espaços
-      const rows2 = String(text || '').split(/\r?\n/).map(l => l.split(/\s{2,}/));
-      res = parseTabelaItens(rows2, 'colagem');
-    }
-    if (!res) return null;
-    const nota = { numero: String(+U.digits(opts.numero) || ''), cnpjRemetente: U.digits(opts.cnpjRemetente), ufRemetente: opts.ufRemetente || '', chave: '', dataEmissao: '', valorNF: 0, valorICMS: 0 };
-    return { kind: 'itens', data: { formato: res.formato, tipo: opts.tipo || res.tipo, nota, linhas: res.linhas, totalLinhasDeclarado: 0 }, warnings: res.warnings };
+    const ls = String(text || '').split(/\r?\n/);
+    let res = lerTabela(ls.map(l => l.split('\t')));
+    if (!res.length) res = lerTabela(ls.map(l => l.split(/\s{2,}/))); // tenta separar por 2+ espaços
+    return res.map(r => {
+      const nota = Object.assign(notaVazia(), r.nota);
+      const numeroNoConteudo = !!nota.numero;
+      if (!nota.numero) nota.numero = String(+U.digits(opts.numero) || '');
+      if (!nota.cnpjRemetente) nota.cnpjRemetente = U.digits(opts.cnpjRemetente);
+      if (!nota.ufRemetente) nota.ufRemetente = opts.ufRemetente || '';
+      return { kind: 'itens', data: { formato: r.formato, tipo: r.tipo || opts.tipo || null, nota, linhas: r.linhas, totalLinhasDeclarado: r.totalLinhasDeclarado || 0, paginas: r.paginas || [], numeroNoConteudo }, warnings: r.warnings };
+    });
   }
 
   /* ============================================================
@@ -419,24 +566,17 @@
       } else if (['xlsx', 'xlsm', 'xls', 'ods'].includes(ext)) {
         if (!global.XLSX) throw new Error('Biblioteca de planilhas não carregada (verifique a conexão).');
         const wb = global.XLSX.read(new Uint8Array(buf), { type: 'array' });
-        let found = 0;
         wb.SheetNames.forEach(sn => {
           const rows = global.XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: '' });
-          const res = parseTabelaItens(rows, 'planilha');
-          if (!res) return;
-          found++;
           const numSheet = /\d{3,9}/.test(sn) ? String(+sn.match(/\d{3,9}/)[0]) : '';
-          const numero = (wb.SheetNames.length > 1 && numSheet) ? numSheet : (numeroDoNomeArquivo(name) || numSheet);
-          out.push({ kind: 'itens', data: { formato: res.formato, tipo: res.tipo, nota: { numero, chave: '', cnpjRemetente: '', ufRemetente: '', dataEmissao: '', valorNF: 0, valorICMS: 0 }, linhas: res.linhas, totalLinhasDeclarado: 0, planilha: sn }, warnings: res.warnings.concat(numero ? [] : ['Número da NF não identificado no nome do arquivo — informe-o no vínculo.']) });
+          const numAlt = (wb.SheetNames.length > 1 && numSheet) ? numSheet : (numeroDoNomeArquivo(name) || numSheet);
+          lerTabela(rows).forEach(r => out.push(docDaTabela(r, numAlt, { planilha: sn })));
         });
-        if (!found) out.push({ kind: 'desconhecido', data: {}, warnings: ['Planilha sem o cabeçalho esperado (DESCRIÇÃO, NCM/SH, ...).'] });
+        if (!out.length) out.push({ kind: 'desconhecido', data: {}, warnings: ['Planilha sem o cabeçalho esperado (DESCRIÇÃO, NCM/SH… ou a tela "Dados da Nota" com NCM, Descrição, Percentual…).'] });
       } else if (['csv', 'txt', 'tsv'].includes(ext)) {
         const text = new TextDecoder('utf-8').decode(buf);
-        const res = parseTabelaItens(parseCSVText(text), 'csv');
-        if (res) {
-          const numero = numeroDoNomeArquivo(name);
-          out.push({ kind: 'itens', data: { formato: res.formato, tipo: res.tipo, nota: { numero, chave: '', cnpjRemetente: '', ufRemetente: '', dataEmissao: '', valorNF: 0, valorICMS: 0 }, linhas: res.linhas, totalLinhasDeclarado: 0 }, warnings: res.warnings });
-        } else out.push({ kind: 'desconhecido', data: {}, warnings: ['Arquivo de texto sem o cabeçalho esperado.'] });
+        lerTabela(parseCSVText(text)).forEach(r => out.push(docDaTabela(r, numeroDoNomeArquivo(name))));
+        if (!out.length) out.push({ kind: 'desconhecido', data: {}, warnings: ['Arquivo de texto sem o cabeçalho esperado.'] });
       } else if (ext === 'xml') {
         const text = new TextDecoder('utf-8').decode(buf);
         const res = parseNFeXML(text);
@@ -447,8 +587,14 @@
     } catch (e) {
       out.push({ kind: 'erro', data: {}, warnings: ['Falha ao ler o arquivo: ' + (e && e.message ? e.message : e)] });
     }
+    // confere o número da NF lido no conteúdo com os números do nome do arquivo
+    const its = out.filter(d => d.kind === 'itens');
+    const nums = numerosDoNome(name);
+    if (its.length === 1 && nums.length && its[0].data.numeroNoConteudo && !nums.includes(its[0].data.nota.numero)) {
+      its[0].warnings = (its[0].warnings || []).concat(`O nome do arquivo não traz o número da NF lida no conteúdo (${its[0].data.nota.numero}) — confira se o arquivo é da nota certa.`);
+    }
     return out.map((d, i) => Object.assign({}, base, d, { part: i }));
   }
 
-  global.RST_PARSERS = { parseFile, parseColagem, parsePrevia, parseCartaoCNPJ, parseDadosNotaBlocks, parseTabelaItens, parseNFeXML, parseCSVText, parseCNAEs, numeroDoNomeArquivo, NUM_RE };
+  global.RST_PARSERS = { parseFile, parseColagem, parsePrevia, parseCartaoCNPJ, parseDadosNotaBlocks, parseTabelaItens, lerTabela, parseNFeXML, parseCSVText, parseCNAEs, numeroDoNomeArquivo, NUM_RE };
 })(window);

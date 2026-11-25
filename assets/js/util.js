@@ -136,6 +136,20 @@
 
   U.slug = s => U.norm(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
 
+  /** Posições de 1 a total que não estão no conjunto, em faixas: ["16–30", "61"]. */
+  U.faixasFaltantes = (presentes, total) => {
+    const out = [];
+    let ini = 0;
+    for (let i = 1; i <= total + 1; i++) {
+      const falta = i <= total && !presentes.has(i);
+      if (falta && !ini) ini = i;
+      if (!falta && ini) { out.push(ini === i - 1 ? String(ini) : `${ini}–${i - 1}`); ini = 0; }
+    }
+    return out;
+  };
+  /** ["a", "b", "c"] → "a, b e c" */
+  U.listaTxt = arr => arr.length <= 1 ? (arr[0] || '') : `${arr.slice(0, -1).join(', ')} e ${arr[arr.length - 1]}`;
+
   /* ---------- Domínio fiscal ---------- */
   U.UF_COD = { 11: 'RO', 12: 'AC', 13: 'AM', 14: 'RR', 15: 'PA', 16: 'AP', 17: 'TO', 21: 'MA', 22: 'PI', 23: 'CE', 24: 'RN', 25: 'PB', 26: 'PE', 27: 'AL', 28: 'SE', 29: 'BA', 31: 'MG', 32: 'ES', 33: 'RJ', 35: 'SP', 41: 'PR', 42: 'SC', 43: 'RS', 50: 'MS', 51: 'MT', 52: 'GO', 53: 'DF' };
   U.UFS = Object.values(U.UF_COD).sort();

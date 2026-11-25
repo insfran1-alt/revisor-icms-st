@@ -17,7 +17,7 @@ Ferramenta web para **revisar as cobranças de ICMS-ST (tributo 333) e de ICMS E
 1. **Empresas** — importe o **cartão CNPJ** (PDF da Receita). As atividades (CNAE), o porte e a data de abertura ficam salvos e orientam a análise.
 2. **Importar** — arraste de uma vez (várias empresas e meses):
    - **Relatório de Prévia com Cálculos ICMS** (PDF) de cada tributo: 333 – ST Comércio e 349 – Equalização Simples Nacional;
-   - **Equalização:** a tela **"Dados da Nota"** de cada NF impressa em PDF;
+   - **Equalização:** a tela **"Dados da Nota"** de cada NF — copie as páginas (cabeçalho da nota e tabela, 15 itens por página) e cole uma abaixo da outra no Excel (ex.: `NOTA 17134.xlsx`), ou cole direto em *Importar → Colar a tabela do portal*. O PDF da tela também serve (um arquivo por página). O app junta as páginas da mesma NF pela numeração "Visualizando 1 - 15 de N", descarta página repetida e avisa se faltar alguma;
    - **ICMS-ST:** a tabela da memória de cálculo — **copie no portal e cole** em *Importar → Colar a tabela do portal*, ou salve em planilha com o número da NF no nome (ex.: `NOTA 19192.xlsx`);
    - opcional: o **XML da NF-e** (confirma ST retido pelo remetente, destinatário, CEST e linhas repetidas).
 3. **Revisão** — filtre por empresa, referência, tributo, força, tipo de achado, status, UF e valor. Clique num achado para ver os dados do item, a fundamentação, a base legal e os documentos a anexar; marque o status e o protocolo.

@@ -158,7 +158,7 @@
       <p>Importe os relatórios de prévia, as memórias de cálculo e o cartão CNPJ das suas empresas. O sistema confere item a item, aponta duplicidades e erros e monta o pedido de revisão com base legal e fundamentação.</p>
       <div class="row" style="justify-content:center"><button class="btn primary" type="button" data-act="pick-files">${ic('upload')} Importar arquivos</button><button class="btn" type="button" data-go="ajuda">${ic('help')} Como usar</button></div>
       <div class="how">
-        <div class="card"><span class="n">1</span><b>Importe</b><span class="muted small">Relatório de Prévia (PDF), tela "Dados da Nota" (PDF), memória de cálculo do ST (planilha ou colagem), XML da NF-e e cartão CNPJ.</span></div>
+        <div class="card"><span class="n">1</span><b>Importe</b><span class="muted small">Relatório de Prévia (PDF), tela "Dados da Nota" (Excel, PDF ou colagem), memória de cálculo do ST (planilha ou colagem), XML da NF-e e cartão CNPJ.</span></div>
         <div class="card"><span class="n">2</span><b>Revise</b><span class="muted small">Duplicidade ST × Equalização, cálculo, MVA, crédito, CEST, destinação dos produtos, isenção de ME e outras checagens.</span></div>
         <div class="card"><span class="n">3</span><b>Peça a revisão</b><span class="muted small">Relatório com base legal e fundamentação, requerimento em Word e lista das NFs para desvincular no e-Fazenda.</span></div>
       </div>
@@ -255,19 +255,27 @@
    * ============================================================ */
   function docInfo(d) {
     const m = App.model;
-    let companyId = d.link && d.link.companyId, ref = '', tipo = '', nf = '', itens = '', valor = null, vinc = '', vincOk = true;
+    let companyId = d.link && d.link.companyId, ref = '', tipo = '', nf = '', itens = '', valor = null, vinc = '', vincOk = true, partes = '';
     if (d.kind === 'previa') { ref = d.data.referencia; tipo = d.data.tipo; nf = `${d.data.notas.length} NF`; valor = d.data.totalValorICMS || U.sum(d.data.notas, n => n.valorICMS); vinc = 'Empresa'; }
     if (d.kind === 'itens') {
       const ch = m.chargesById.get(m.docCharge.get(d.id));
       tipo = (ch && ch.tipo) || d.data.tipo || '';
       nf = 'NF ' + ((ch && ch.numero) || d.data.nota.numero || '?');
       itens = d.data.linhas.length; valor = U.sum(d.data.linhas, l => l.icms);
+      // itens da tela "Dados da Nota" presentes neste arquivo (pela numeração "Visualizando a - b de N"), em faixas contínuas
+      const tot = d.data.totalLinhasDeclarado || 0;
+      const ps = tot ? [...new Set(d.data.linhas.map(l => l.pos).filter(Boolean))].sort((a, b) => a - b) : [];
+      if (ps.length) {
+        const fx = [];
+        ps.forEach(p => { const u = fx[fx.length - 1]; if (u && p === u.ate + 1) u.ate = p; else fx.push({ de: p, ate: p }); });
+        partes = fx.length === 1 && fx[0].de === 1 && fx[0].ate >= tot ? `todos os ${tot} itens` : `itens ${fx.map(f => f.de === f.ate ? f.de : `${f.de}–${f.ate}`).join(', ')} de ${tot}`;
+      }
       if (ch) { companyId = ch.companyId; ref = ch.referencia; vincOk = ch.origem === 'previa'; vinc = vincOk ? 'Prévia' : 'Sem prévia'; }
       else { vincOk = false; vinc = 'Não vinculado'; }
     }
     if (d.kind === 'nfe') { nf = 'NF ' + d.data.numero; itens = d.data.itens.length; valor = d.data.valorNF; const nfm = m.nfs.find(x => x.xml && x.xml.id === d.id); vincOk = !!nfm; vinc = nfm ? 'Cobrança' : 'Sem cobrança'; if (nfm) companyId = nfm.companyId; }
     if (d.kind === 'cnpj') { nf = U.fmtCNPJ(d.data.cnpj); vinc = 'Empresa'; }
-    return { companyId, ref, tipo, nf, itens, valor, vinc, vincOk };
+    return { companyId, ref, tipo, nf, itens, valor, vinc, vincOk, partes };
   }
 
   function viewImportar() {
@@ -287,17 +295,17 @@
           <div class="ico">${ic('upload')}</div>
           <h3>Arraste e solte os arquivos aqui</h3>
           <div class="muted">ou clique para selecionar — vários de uma vez, de várias empresas</div>
-          <div class="types"><span>Relatório de Prévia (PDF)</span><span>Dados da Nota (PDF)</span><span>Memória ST (XLSX/CSV)</span><span>XML da NF-e</span><span>Cartão CNPJ (PDF)</span></div>
+          <div class="types"><span>Relatório de Prévia (PDF)</span><span>Dados da Nota (Excel ou PDF)</span><span>Memória ST (XLSX/CSV)</span><span>XML da NF-e</span><span>Cartão CNPJ (PDF)</span></div>
           <div class="progress hidden" id="imp-progress"><span></span></div>
           <div class="tiny muted" id="imp-status"></div>
         </div>
         <div class="card card-pad stack">
-          <div><h3>Colar a tabela do portal</h3><div class="muted small">Selecione a tabela da memória de cálculo no portal da SEFAZ, copie (Ctrl+C) e cole abaixo — sem montar planilha. Copie também o cabeçalho.</div></div>
+          <div><h3>Colar a tabela do portal</h3><div class="muted small">Selecione a tabela da memória de cálculo no portal da SEFAZ, copie (Ctrl+C) e cole abaixo — sem montar planilha. Copie também o cabeçalho. Na Equalização, cole as páginas da tela "Dados da Nota" uma depois da outra: o nº da NF e o tributo vêm da própria colagem.</div></div>
           <div class="grid g3">
             <label class="field"><span>Empresa</span><select id="paste-emp">${opt('', comps.length === 1 ? nomeCurto(comps[0]) : 'Pelo relatório de prévia', '')}${comps.map(c => opt(c.id, nomeCurto(c), App.ui.empresa)).join('')}</select></label>
             <label class="field"><span>Referência</span><input type="month" id="paste-ref" value="${h(refDefault)}"></label>
             <label class="field"><span>Tributo</span><select id="paste-tipo">${opt('ST', 'ICMS-ST (333)', 'ST')}${opt('EQ', 'Equalização (349)', '')}</select></label>
-            <label class="field"><span>Nº da NF *</span><input type="text" id="paste-nf" inputmode="numeric" placeholder="Ex.: 19192"></label>
+            <label class="field"><span>Nº da NF</span><input type="text" id="paste-nf" inputmode="numeric" placeholder="Se não vier na colagem"></label>
             <label class="field"><span>CNPJ do remetente</span><input type="text" id="paste-cnpj" placeholder="opcional"></label>
             <label class="field"><span>UF de origem</span><select id="paste-uf">${opt('', '—', '')}${U.UFS.map(u => opt(u, u, '')).join('')}</select></label>
           </div>
@@ -316,7 +324,7 @@
             const warn = (d.warnings || []).length;
             return `<tr><td class="desc"><b class="small">${h(d.fileName)}</b>${d.data && d.data.planilha ? `<div class="sub">aba ${h(d.data.planilha)}</div>` : ''}<div class="sub">${h(U.brDate((d.importedAt || '').slice(0, 10)))}</div></td>
               <td><div class="small">${h(TIPO_DOC[d.kind] || d.kind)}</div>${i.tipo ? tipoPill(i.tipo, d.kind === 'previa' ? d.data.tributoCodigo : '') : ''}</td>
-              <td class="small">${h(c ? nomeCurto(c) : '—')}</td><td class="small">${h(U.refLabel(i.ref))}</td><td class="small nowrap">${h(i.nf)}</td>
+              <td class="small">${h(c ? nomeCurto(c) : '—')}</td><td class="small">${h(U.refLabel(i.ref))}</td><td class="small nowrap">${h(i.nf)}${i.partes ? `<div class="sub">${h(i.partes)}</div>` : ''}</td>
               <td class="num">${i.itens === '' ? '' : i.itens}</td><td class="num">${i.valor === null ? '' : U.brl(i.valor)}</td>
               <td>${i.vinc ? `<span class="pill ${i.vincOk ? 'ok' : 'moderada'}">${h(i.vinc)}</span>` : ''}</td>
               <td>${warn ? `<span class="pill moderada" title="${h(d.warnings.join('\n'))}">${warn} aviso(s)</span>` : '<span class="sub">—</span>'}</td>
@@ -399,23 +407,30 @@
     const text = $('#paste-text').value;
     const numero = U.digits($('#paste-nf').value);
     if (!text.trim()) return toast('Cole a tabela no campo de texto.', 'err');
-    if (!numero) return toast('Informe o número da NF.', 'err');
-    const tipo = $('#paste-tipo').value;
-    const d = P.parseColagem(text, { tipo, numero, cnpjRemetente: $('#paste-cnpj').value, ufRemetente: $('#paste-uf').value });
-    if (!d) return toast('Não reconheci a tabela. Copie também a linha de cabeçalho (DESCRIÇÃO, NCM/SH…).', 'err', 6000);
+    const tipoSel = $('#paste-tipo').value;
+    const lidos = P.parseColagem(text, { tipo: tipoSel, numero, cnpjRemetente: $('#paste-cnpj').value, ufRemetente: $('#paste-uf').value });
+    if (!lidos.length) return toast('Não reconheci a tabela. Copie também a linha de cabeçalho (DESCRIÇÃO, NCM/SH… ou NCM, Descrição, Percentual…).', 'err', 6000);
+    if (lidos.some(d => !d.data.nota.numero)) return toast('Informe o número da NF.', 'err');
     const ref = U.refKey($('#paste-ref').value);
-    const doc = Object.assign(d, {
-      fileName: `Colagem — NF ${numero} (${tipo})`, hash: 'colagem-' + U.hashText(tipo + numero + text), size: text.length, part: 0,
-      link: { companyId: $('#paste-emp').value || '', referencia: '', tipo, numero, cnpjRemetente: U.digits($('#paste-cnpj').value) }
-    });
-    // usa a referência só se não houver prévia com esse número
-    const temPrevia = App.model.charges.some(c => c.origem === 'previa' && c.numero === String(+numero) && c.tipo === tipo);
-    if (!temPrevia) doc.link.referencia = ref;
     const res = { ok: [], dup: [], subst: [], erros: [], avisos: [], empresas: [] };
-    addDoc(doc, res);
+    lidos.forEach((d, i) => {
+      // o tributo reconhecido pelo cabeçalho da tabela prevalece sobre a seleção
+      const tipo = d.data.tipo || tipoSel;
+      const num = d.data.nota.numero;
+      const doc = Object.assign(d, {
+        fileName: `Colagem — NF ${num} (${tipo})`, hash: 'colagem-' + U.hashText(tipo + num + text), size: text.length, part: i,
+        link: { companyId: $('#paste-emp').value || '', referencia: '', tipo, numero: num, cnpjRemetente: U.digits($('#paste-cnpj').value) }
+      });
+      // usa a referência só se não houver prévia com esse número
+      const temPrevia = App.model.charges.some(c => c.origem === 'previa' && c.numero === String(+num) && c.tipo === tipo);
+      if (!temPrevia) doc.link.referencia = ref;
+      addDoc(doc, res);
+    });
     App.lastImport = res;
     commit();
-    toast(res.ok.length ? `Colagem importada: ${d.data.linhas.length} item(ns) da NF ${numero}.` : 'Essa colagem já havia sido importada.', res.ok.length ? 'ok' : '');
+    const nItens = U.sum(lidos, d => d.data.linhas.length);
+    const outroTipo = lidos.find(d => d.data.tipo && d.data.tipo !== tipoSel);
+    toast(res.ok.length ? `Colagem importada: ${nItens} item(ns) da NF ${U.uniq(lidos.map(d => d.data.nota.numero)).join(', ')}${outroTipo ? ` (reconhecida como ${outroTipo.data.tipo === 'EQ' ? 'Equalização' : 'ICMS-ST'})` : ''}.` : 'Essa colagem já havia sido importada.', res.ok.length ? 'ok' : '', 6000);
   }
 
   function openEditLink(docId) {
@@ -970,7 +985,7 @@
         <ol class="steps">
           <li><b>Cartão CNPJ</b> de cada empresa (PDF da Receita): grava as atividades (CNAE), o porte e a data de abertura.</li>
           <li><b>Relatório de Prévia com Cálculos ICMS</b> de cada tributo — 333 (ST Comércio) e 349 (Equalização Simples Nacional) — em PDF.</li>
-          <li><b>Memória de cálculo de cada NF</b>: para a Equalização, imprima a tela "Dados da Nota" em PDF; para o ST, copie a tabela do portal e cole em <i>Importar → Colar a tabela</i> (ou salve em planilha com o nº da NF no nome, ex.: <i>NOTA 19192.xlsx</i>).</li>
+          <li><b>Memória de cálculo de cada NF</b>: para a Equalização, copie as páginas da tela "Dados da Nota" (cabeçalho da nota e tabela, 15 itens por página) e cole uma abaixo da outra no Excel — ou direto em <i>Importar → Colar a tabela</i>; o PDF da tela também serve, um arquivo por página. O app junta as páginas pela numeração "Visualizando 1 - 15 de N", ignora página repetida e avisa se faltar alguma. Para o ST, copie a tabela do portal e cole em <i>Importar → Colar a tabela</i> (ou salve em planilha com o nº da NF no nome, ex.: <i>NOTA 19192.xlsx</i>).</li>
           <li>Opcional: <b>XML das NF-e</b> — confirma ICMS-ST já retido pelo fornecedor, destinatário, CEST e linhas repetidas.</li>
           <li>Abra <b>Revisão</b>: filtre, confira cada achado, ajuste a destinação dos produtos e marque o status.</li>
           <li>Gere o <b>Excel</b> (com base legal e fundamentação), o <b>requerimento</b> (Word/PDF) e a <b>lista para o e-Fazenda</b>.</li>

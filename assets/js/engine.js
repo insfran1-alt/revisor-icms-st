@@ -26,20 +26,39 @@
 
   function lineKey(l) { return [U.normKey(l.descricao).slice(0, 60), U.round2(l.valorTotal || 0), U.round2(l.icms || 0), U.round2(l.custoFinal || 0), U.round2(l.ipi || 0)].join('|'); }
 
-  /** Une as linhas de várias memórias da mesma cobrança (re-importações ou partes), sem repetir linhas idênticas entre arquivos. */
+  /** Une as linhas de várias memórias da mesma cobrança (re-importações ou partes), sem repetir linhas idênticas entre arquivos.
+   *  Quando a memória traz a numeração da tela ("Visualizando a - b de N"), cada item tem sua posição e as partes se encaixam por ela. */
   function mergeLines(docs) {
     if (!docs.length) return [];
     const sorted = docs.slice().sort((a, b) => b.data.linhas.length - a.data.linhas.length);
-    const out = sorted[0].data.linhas.map(line => ({ line, docId: sorted[0].id }));
-    for (let k = 1; k < sorted.length; k++) {
-      const pool = new Map();
-      out.forEach(o => { const key = lineKey(o.line); pool.set(key, (pool.get(key) || 0) + 1); });
-      sorted[k].data.linhas.forEach(line => {
-        const key = lineKey(line);
-        const c = pool.get(key) || 0;
-        if (c > 0) pool.set(key, c - 1); else out.push({ line, docId: sorted[k].id });
+    const totais = U.uniq(sorted.filter(d => d.data.linhas.some(l => l.pos)).map(d => d.data.totalLinhasDeclarado || 0));
+    const usarPos = totais.length === 1 && totais[0] > 0;
+    const out = [];
+    const posUsadas = new Set();
+    sorted.forEach(d => {
+      // linhas já trazidas por outros arquivos (multiconjunto); linhas idênticas dentro do mesmo arquivo são mantidas
+      const pool = new Map(), poolSemPos = new Map();
+      out.forEach(o => {
+        const k = lineKey(o.line);
+        pool.set(k, (pool.get(k) || 0) + 1);
+        if (!(usarPos && o.line.pos)) poolSemPos.set(k, (poolSemPos.get(k) || 0) + 1);
       });
-    }
+      d.data.linhas.forEach(line => {
+        const key = lineKey(line);
+        if (usarPos && line.pos) {
+          if (posUsadas.has(line.pos)) return; // posição já lida (página repetida ou parte importada de novo)
+          posUsadas.add(line.pos);
+          const c = poolSemPos.get(key) || 0; // a mesma linha já veio de um arquivo sem numeração
+          if (c > 0) { poolSemPos.set(key, c - 1); return; }
+          out.push({ line, docId: d.id });
+          return;
+        }
+        const c = pool.get(key) || 0;
+        if (c > 0) { pool.set(key, c - 1); return; }
+        out.push({ line, docId: d.id });
+      });
+    });
+    if (usarPos) out.sort((a, b) => (a.line.pos || 1e9) - (b.line.pos || 1e9));
     return out;
   }
 
@@ -314,6 +333,12 @@
       const company = companies.get(ch.companyId);
       const nf = nfs.get(ch.nfKey);
       const lines = mergeLines(ch.itemDocs);
+      // itens que faltam na memória, pela numeração da tela ("Visualizando a - b de N")
+      const totalDecl = ch.itemDocs.reduce((mx, d) => Math.max(mx, d.data.totalLinhasDeclarado || 0), 0);
+      ch.totalItensDeclarado = totalDecl;
+      const posLidas = new Set(lines.map(l => l.line.pos).filter(Boolean));
+      const semPos = lines.length - lines.filter(l => l.line.pos).length;
+      ch.itensFaltando = totalDecl && posLidas.size && totalDecl - posLidas.size > semPos ? U.faixasFaltantes(posLidas, totalDecl) : [];
       const occ = new Map();
       ch.itens = lines.map((ln, idx) => {
         const it = Object.assign({}, ln.line, {
@@ -328,9 +353,9 @@
           it.aliqIntra = it.aliqST > 0 ? it.aliqST : aIntra;
           const efetiva = it.bcProprio > 0 ? (it.credito || 0) / it.bcProprio * 100 : 0;
           const porUF = U.aliqInterestadualParaMS(ch.ufRemetente);
-          // origem da mercadoria: XML (orig) ou 1º dígito do CST de 3 dígitos (desde que os 2 últimos formem um CST válido, e não um CSOSN)
+          // origem da mercadoria: XML (orig) ou 1º dígito do CST com origem — 3 dígitos (origem + CST) ou 4 dígitos (origem + CSOSN)
           const cst3 = String(it.cst || '').trim();
-          const cstValido = /^\d(00|10|20|30|40|41|50|51|60|70|90)$/.test(cst3);
+          const cstValido = /^\d(00|10|20|30|40|41|50|51|60|70|90)$/.test(cst3) || /^\d(101|102|103|201|202|203|300|400|500|900)$/.test(cst3);
           it.importado = it.xmlItem ? ORIGEM_IMPORTADA.includes(String(it.xmlItem.orig)) : (cstValido && ORIGEM_IMPORTADA.includes(cst3.charAt(0)));
           if (it.aliqProprio > 0) { it.aliqInter = U.snapAliqInter(it.aliqProprio); it.aliqInterFonte = 'alíquota destacada na NF'; }
           else if (efetiva > 0) { it.aliqInter = U.snapAliqInter(efetiva); it.aliqInterFonte = 'crédito admitido pela SEFAZ'; }
@@ -452,7 +477,9 @@
         Object.values(byRef).forEach(list => {
           const baseST = U.round2(U.sum(list.filter(c => c.tipo === 'ST'), c => c.somaBase));
           const baseEQ = U.round2(U.sum(list.filter(c => c.tipo === 'EQ'), c => c.somaBase));
-          const excesso = U.round2(baseST + baseEQ - nf.valorNF);
+          // o frete (rateio do CT-e, frete FOB) integra a base, mas não o valor da NF
+          const frete = U.round2(U.sum(list, c => U.sum(c.itens, i => i.frete || 0)));
+          const excesso = U.round2(baseST + baseEQ - frete - nf.valorNF);
           const explicado = U.round2(U.sum(pairsAll.filter(p => list.includes(p.ec)), p => p.e.base));
           const resto = U.round2(excesso - explicado);
           if (resto > Math.max(1, nf.valorNF * 0.002)) {
@@ -462,8 +489,8 @@
             const taxa = eq ? (eq.somaBase > 0 ? U.sum(eq.itens, i => i.icms) / eq.somaBase : 0.1) : (st.somaBase > 0 ? st.somaItensICMS / st.somaBase : 0);
             const est = U.round2(resto * taxa);
             add('DUP_BASES', alvo, null, { revisar: est }, {
-              resumo: `ST ${brl(baseST)} + EQ ${brl(baseEQ)} = ${brl(baseST + baseEQ)} > valor da NF ${brl(nf.valorNF)}.`,
-              fund: `Na ${nfTxt(alvo)}, de valor total ${brl(nf.valorNF)}, a soma das bases utilizadas nas cobranças da referência ${U.refLabel(alvo.referencia)} — ICMS-ST: ${brl(baseST)}; Equalização: ${brl(baseEQ)} — totaliza ${brl(baseST + baseEQ)}, superando o valor da própria nota em ${brl(resto)} não explicados por itens já identificados. Como cada mercadoria só pode integrar uma das sistemáticas (art. 3º, § 1º, II, "a", do Decreto nº 15.055/2018) e a base está limitada ao valor da operação (LC nº 87/1996, art. 8º; Decreto nº 15.055/2018, art. 4º), o excedente evidencia itens computados em duplicidade. Requer-se a revisão da apuração com a exclusão dos itens repetidos; valor estimado cobrado a maior: ${brl(est)}.`
+              resumo: `ST ${brl(baseST)} + EQ ${brl(baseEQ)}${frete ? ` − frete ${brl(frete)}` : ''} = ${brl(baseST + baseEQ - frete)} > valor da NF ${brl(nf.valorNF)}.`,
+              fund: `Na ${nfTxt(alvo)}, de valor total ${brl(nf.valorNF)}, a soma das bases utilizadas nas cobranças da referência ${U.refLabel(alvo.referencia)} — ICMS-ST: ${brl(baseST)}; Equalização: ${brl(baseEQ)} — totaliza ${brl(baseST + baseEQ)}${frete ? ` (${brl(baseST + baseEQ - frete)} sem o frete de ${brl(frete)}, que não integra o valor da nota)` : ''}, superando o valor da própria nota em ${brl(resto)} não explicados por itens já identificados. Como cada mercadoria só pode integrar uma das sistemáticas (art. 3º, § 1º, II, "a", do Decreto nº 15.055/2018) e a base está limitada ao valor da operação (LC nº 87/1996, art. 8º; Decreto nº 15.055/2018, art. 4º), o excedente evidencia itens computados em duplicidade. Requer-se a revisão da apuração com a exclusão dos itens repetidos; valor estimado cobrado a maior: ${brl(est)}.`
             }, { integral: false });
           }
         });
@@ -478,7 +505,10 @@
       const industrial = company ? (company.industrial === true || (company.industrial !== false && company.cnaePrincipal && U.cnaeIndustrial(company.cnaePrincipal.codigo))) : false;
       const alimentacao = company ? [company.cnaePrincipal].concat(company.cnaesSecundarios || []).filter(Boolean).find(c => U.cnaeAlimentacao(c.codigo)) : null;
 
-      // Itens repetidos na mesma memória
+      // Itens repetidos na mesma memória. Sem o XML, se as bases da NF (ST + EQ, sem frete) cabem no valor da nota,
+      // as linhas repetidas tendem a ser linhas distintas da própria NF (mesmo produto lançado mais de uma vez)
+      const cabeNaNF = !!(nf && nf.valorNF > 0) && U.sum(nf.charges.filter(c => c.referencia === ch.referencia && (c.tipo === 'ST' || c.tipo === 'EQ')),
+        c => U.sum(c.itens || [], i => (i.base || 0) - (i.frete || 0))) <= nf.valorNF + 0.05;
       const grp = U.groupBy(ch.itens, it => [U.normKey(it.descricao), it.ncm, U.round2(it.valorTotal || 0), U.round2(it.ipi || 0), U.round2(it.icms || 0), U.round2(it.qtdTrib || it.qtd || 0), U.round2(it.frete || 0)].join('|'));
       Object.values(grp).filter(g => g.length > 1).forEach(g => {
         let xmlCount = null;
@@ -486,9 +516,9 @@
         if (xmlCount !== null && xmlCount >= g.length) return;
         const extras = xmlCount !== null ? g.length - Math.max(xmlCount, 1) : g.length - 1;
         g.slice(g.length - extras).forEach(it => add('DUP_ITEM', ch, it, { revisar: it.icms }, {
-          resumo: `Linha idêntica aparece ${g.length} vezes na memória${xmlCount !== null ? ` (XML: ${xmlCount})` : ''}.`,
+          resumo: `Linha idêntica aparece ${g.length} vezes na memória${xmlCount !== null ? ` (XML: ${xmlCount})` : ''}.${xmlCount === null && cabeNaNF ? ' As bases cabem no valor da NF: podem ser linhas distintas da nota — confira no XML.' : ''}`,
           fund: `Na memória de cálculo do ${tribTxt(ch)} da ${nfTxt(ch)} (referência ${U.refLabel(ch.referencia)}), o item ${itTxt(it)} aparece ${g.length} vezes com valores idênticos (mercadoria ${brl(it.valorTotal)}, ICMS ${brl(it.icms)} por linha). ${xmlCount !== null ? `O XML da NF-e contém ${xmlCount} ocorrência(s) do item, o que confirma a duplicidade.` : 'Confira no DANFE/XML se o item consta em linhas distintas da nota.'} Requer-se a exclusão da linha repetida, no valor de ${brl(it.icms)}.`
-        }, { forca: xmlCount !== null ? 'forte' : 'moderada', integral: true }));
+        }, { forca: xmlCount !== null ? 'forte' : (cabeNaNF ? 'atencao' : 'moderada'), integral: true }));
       });
 
       if (ch.tipo === 'ST') {
@@ -606,12 +636,14 @@
           if (aInter && aInter > 0 && (it.percentual || 0) > 0) {
             const correto = U.round2(aIntra - aInter);
             if (it.percentual > correto + 0.01) {
+              // 13% (17% − 4%) é o percentual da mercadoria importada (Res. SF nº 13/2012), que a SEFAZ aplica pela origem
+              // informada na NF-e: sem o XML mostrando origem nacional, não há o que contestar
               const possivelImport = !it.xmlItem && Math.abs(it.percentual - (aIntra - 4)) < 0.011;
               const dif = U.round2(it.base * (it.percentual - correto) / 100);
-              if (dif > tol) add('EQ_PERC', ch, it, { revisar: dif, devido: U.round2(it.base * correto / 100) }, {
-                resumo: `Aplicado ${pct(it.percentual)}; correto ${pct(correto)} (origem ${ch.ufRemetente}${importado ? ', importado' : ''}).${possivelImport ? ' Confirme se o item é importado (4%).' : ''}`,
+              if (dif > tol && !possivelImport) add('EQ_PERC', ch, it, { revisar: dif, devido: U.round2(it.base * correto / 100) }, {
+                resumo: `Aplicado ${pct(it.percentual)}; correto ${pct(correto)} (origem ${ch.ufRemetente}${importado ? ', importado' : ''}).`,
                 fund: `Na Equalização do item ${itTxt(it)} da ${nfTxt(ch)}, foi aplicado o percentual de ${pct(it.percentual)}. Pelo art. 5º do Decreto nº 15.055/2018, o percentual é a diferença entre a alíquota interna de MS (${pct(aIntra)}) e a alíquota interestadual da origem (${pct(aInter)} — ${importado ? 'mercadoria importada, Res. SF nº 13/2012' : `remetente em ${ch.ufRemetente}, Res. SF nº 22/1989`}), ou seja, ${pct(correto)}. Requer-se a revisão da cobrança, com exclusão de ${brl(dif)}.`
-              }, { forca: possivelImport ? 'moderada' : 'forte' });
+              }, { forca: 'forte' });
             }
           }
           if ((it.icms || 0) - it.icmsCalc > tol) {
@@ -706,7 +738,12 @@
         pend.push({ tipo: 'sem_itens', nivel: 'acao', companyId: ch.companyId, referencia: ch.referencia, chargeId: ch.id, nfKey: ch.nfKey,
           texto: `Importe a memória de cálculo da NF ${ch.numero} (${ch.tipo === 'ST' ? 'ICMS-ST' : 'Equalização'}, ref. ${U.refLabel(ch.referencia)}) — ${brl(ch.valorICMS)} cobrados ainda não conferidos item a item.` });
       }
-      if (ch.origem === 'previa' && ch.itemDocs.length && Math.abs(ch.somaItensICMS - ch.valorICMS) > 0.05) {
+      const faltam = (ch.itensFaltando || []).length > 0;
+      if (faltam) {
+        pend.push({ tipo: 'itens_faltando', nivel: 'acao', companyId: ch.companyId, referencia: ch.referencia, chargeId: ch.id, nfKey: ch.nfKey,
+          texto: `NF ${ch.numero} (${ch.tipo === 'ST' ? 'ICMS-ST' : 'Equalização'}, ref. ${U.refLabel(ch.referencia)}): faltam os itens ${U.listaTxt(ch.itensFaltando)} de ${ch.totalItensDeclarado} — importe as páginas que faltam da tela "Dados da Nota".` });
+      }
+      if (ch.origem === 'previa' && ch.itemDocs.length && !faltam && Math.abs(ch.somaItensICMS - ch.valorICMS) > Math.max(0.05, ch.itens.length * 0.003)) {
         pend.push({ tipo: 'soma', nivel: 'alerta', companyId: ch.companyId, referencia: ch.referencia, chargeId: ch.id, nfKey: ch.nfKey,
           texto: `NF ${ch.numero} (${ch.tipo}): soma dos itens ${brl(ch.somaItensICMS)} ≠ valor cobrado ${brl(ch.valorICMS)}. ${ch.somaItensICMS < ch.valorICMS ? 'Faltam páginas da memória?' : 'Há itens a mais na memória.'}` });
       }
