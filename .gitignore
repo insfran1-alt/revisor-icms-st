@@ -1,0 +1,12 @@
+# Dados de clientes nunca vão para o repositório
+*.pdf
+*.xlsx
+*.xlsm
+*.xls
+*.ods
+*.xml
+*.csv
+backup-*.json
+~$*
+Thumbs.db
+desktop.ini
