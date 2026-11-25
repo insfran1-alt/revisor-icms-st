@@ -1,5 +1,7 @@
 # Revisor ICMS-ST — SEFAZ/MS · Simples Nacional
 
+**Acesse o app:** https://insfran1-alt.github.io/revisor-icms-st/
+
 Ferramenta web para **revisar as cobranças de ICMS-ST (tributo 333) e de ICMS Equalização Simples Nacional (tributo 349)** apuradas pela SEFAZ/MS nas compras interestaduais de empresas do Simples Nacional. Ela:
 
 - confere **item a item** as memórias de cálculo de cada nota fiscal;
