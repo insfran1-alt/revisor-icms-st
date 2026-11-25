@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revisor ICMS-ST</title>
+<meta name="description" content="Revisão das cobranças de ICMS-ST e ICMS Equalização Simples Nacional apuradas pela SEFAZ/MS: duplicidades, erros de cálculo, enquadramento e base legal para o pedido de revisão.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230f766e'/%3E%3Cpath d='M8 7h5l3 3v7H8z' fill='none' stroke='white' stroke-width='1.6' stroke-linejoin='round'/%3E%3Cpath d='M10 13l1.5 1.5L14 12' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/><path d="M13 3v5h5v2"/><circle cx="16.5" cy="16.5" r="3.5"/><path d="M19 19l2.5 2.5"/></svg></div>
+      <div><h1>Revisor ICMS-ST</h1><p>SEFAZ/MS · Simples Nacional</p></div>
+    </div>
+    <nav class="nav" id="nav" aria-label="Seções"></nav>
+    <div class="sidebar-foot">
+      <div class="privacy"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg><span>Os arquivos são lidos neste navegador. Nenhum dado é enviado para servidores.</span></div>
+      <div id="storage-info" class="tiny"></div>
+    </div>
+  </aside>
+  <main>
+    <header class="topbar">
+      <h2 id="view-title">Painel</h2>
+      <div class="scope">
+        <select id="scope-empresa" aria-label="Empresa"></select>
+        <select id="scope-ref" aria-label="Referência"></select>
+      </div>
+      <button class="btn primary" data-act="pick-files" type="button"><svg class="i" viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg><span>Importar</span></button>
+      <button class="btn icon ghost" data-act="toggle-theme" type="button" title="Alternar tema claro/escuro" aria-label="Alternar tema"><svg class="i" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </header>
+    <div class="content" id="view" tabindex="-1"></div>
+  </main>
+</div>
+<div class="overlay" id="overlay"></div>
+<aside class="drawer" id="drawer" aria-hidden="true" role="dialog" aria-modal="true"></aside>
+<section class="modal" id="modal" aria-hidden="true" role="dialog" aria-modal="true"></section>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<input type="file" id="file-input" multiple accept=".pdf,.xlsx,.xls,.xlsm,.ods,.csv,.txt,.xml" hidden>
+<input type="file" id="backup-input" accept=".json,application/json" hidden>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/pdftext.js"></script>
+<script src="assets/js/parsers.js"></script>
+<script src="assets/js/legal.js"></script>
+<script src="assets/js/engine.js"></script>
+<script src="assets/js/store.js"></script>
+<script src="assets/js/reports.js"></script>
+<script src="assets/js/ui.js"></script>
+</body>
+</html>
