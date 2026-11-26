@@ -129,6 +129,15 @@ table.data.mem tr.grp td { background: var(--surface-2); padding: 6px 8px; }
 table.data.mem tfoot td { position: sticky; bottom: 0; z-index: 1; white-space: nowrap; }
 table.data.mem tfoot td.fixa { z-index: 3; background: var(--surface-2); }
 
+/* Pedido no e-Fazenda */
+.efz-aba { margin: 4px 0 0; font-size: 13px; display: flex; gap: 8px; align-items: center; }
+.efz-nf { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.efz-campo { display: flex; gap: 6px; align-items: flex-start; justify-content: space-between; min-width: 180px; }
+td.efz-just .efz-campo { min-width: 300px; }
+.efz-campo > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.efz-acoes { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+td.efz-just { min-width: 260px; }
+
 /* Lista de itens: grupos e itens do grupo */
 .icon-toggle { padding: 2px 4px; margin-right: 4px; vertical-align: middle; }
 .icon-toggle svg { transition: transform .15s ease; }

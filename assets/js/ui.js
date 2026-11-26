@@ -1589,9 +1589,28 @@
   function openEFazenda() {
     const fs = filteredFindings().filter(f => f.valorRevisar > 0);
     const txt = R.listaEFazenda(App.model, fs);
-    openModal(`<div class="mh"><h3>Lista para o pedido no e-Fazenda</h3><button class="btn primary" type="button" data-act="copy-efaz">${ic('copy')} Copiar</button><button class="btn icon ghost" type="button" data-act="close-modal" aria-label="Fechar">${ic('x')}</button></div>
-      <div class="mb"><div class="callout">Use esta lista no módulo <b>Informações Fiscais</b> do e-Fazenda. Ela considera os achados do filtro atual da tela de Revisão (sem os descartados). Lembre-se: um pedido por mês de referência e por tributo.</div>
-      <textarea id="efaz-text" rows="22" readonly>${h(txt)}</textarea></div>`);
+    const grupos = R.pedidoEFazenda(App.model, fs);
+    App.efazGrupos = grupos;
+    const copia = (t, lim) => `<div class="efz-campo"><span>${h(t)}</span><span class="efz-acoes">${lim ? `<span class="tiny muted">${t.length}/${lim}</span>` : ''}<button class="btn sm ghost" type="button" data-act="copy-text" data-text="${h(t)}" title="Copiar">${ic('copy')}</button></span></div>`;
+    const nfCel = n => `<b>${h(n.numero)}</b><div class="sub">${h(U.fmtCNPJ(n.cnpj))}${n.uf ? '/' + h(n.uf) : ''}${n.razao ? ' · ' + h(n.razao) : ''}</div>`;
+    const blocos = grupos.map(g => `<div class="card efz-grupo">
+      <div class="card-head"><h3>${h(g.empresa)} · Ref. ${h(U.refLabel(g.referencia))}</h3>${tipoPill(g.tipo, g.tributoCodigo)}<span class="pill neutro">a revisar ${U.brl(g.total)}</span></div>
+      <div class="card-pad stack">
+        <h4 class="efz-aba">Notas a Desvincular <span class="pill neutro">${g.desvincular.length}</span></h4>
+        ${g.desvincular.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Nota fiscal</th><th class="num">ICMS</th><th>Motivo</th><th>Descrição</th><th>Justificativa</th></tr></thead><tbody>
+          ${g.desvincular.map(n => `<tr><td class="nowrap">${nfCel(n)}</td><td class="num">${U.brl(n.icmsNF)}</td><td class="small">${copia(n.motivo)}</td><td class="small">${copia(n.descricao, R.LIM_DESC)}</td><td class="small efz-just">${copia(n.justificativa, R.LIM_JUST)}</td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="muted small">Nenhuma nota para desvincular inteira.</div>'}
+        <h4 class="efz-aba">Notas a Alterar <span class="pill neutro">${g.alterar.length}</span></h4>
+        ${g.alterar.length ? g.alterar.map(n => `<div class="efz-nf"><div class="row"><span>Nota fiscal: ${nfCel(n)}</span><span class="pill moderada" style="margin-left:auto">a revisar ${U.brl(n.revisar)}</span></div>
+          <div class="table-wrap"><table class="data"><thead><tr><th>NCM/SH</th><th>Descrição item</th><th class="num">Vlr total</th><th class="num">Valor ICMS</th><th>Motivo alteração</th><th>Descrição</th><th>Justificativa</th></tr></thead><tbody>
+          ${n.itens.map(i => `<tr><td class="small nowrap">${h(U.digits(i.ncm))}</td><td class="small">${h(i.descricaoItem)}</td><td class="num">${U.fmt(i.valorTotal, 2)}</td><td class="num">${U.fmt(i.icms, 2)}<div class="sub">rever ${U.fmt(i.revisar, 2)}</div></td>
+            <td class="small">${copia(i.motivo)}</td><td class="small">${copia(i.descricao, R.LIM_DESC)}</td><td class="small efz-just">${copia(i.justificativa, R.LIM_JUST)}</td></tr>`).join('')}
+          </tbody></table></div></div>`).join('') : '<div class="muted small">Nenhum item para alterar.</div>'}
+      </div></div>`).join('');
+    openModal(`<div class="mh"><h3>Pedido no e-Fazenda — Revisão de NF</h3><button class="btn" type="button" data-act="export-efaz" ${grupos.length ? '' : 'disabled'}>${ic('download')} Excel</button><button class="btn" type="button" data-act="copy-efaz">${ic('copy')} Copiar resumo</button><button class="btn icon ghost" type="button" data-act="close-modal" aria-label="Fechar">${ic('x')}</button></div>
+      <div class="mb stack"><div class="callout">Montado como a tela <b>Informações Fiscais → Revisão de NF</b>: a aba <b>Notas a Desvincular</b> recebe a nota inteira; a aba <b>Notas a Alterar</b>, item a item. Em cada linha, escolha o <b>Motivo</b> indicado e, no quadro "Confirmação de Dados", cole a <b>Descrição</b> (até ${R.LIM_DESC} caracteres) e a <b>Justificativa</b> (até ${R.LIM_JUST}). Considera os achados do filtro atual da Revisão, sem os descartados. Um pedido por mês de referência e por tributo.</div>
+      ${blocos || '<div class="muted">Nenhum valor a revisar no filtro atual.</div>'}
+      <textarea id="efaz-text" hidden readonly>${h(txt)}</textarea></div>`);
   }
 
   /* ============================================================
@@ -1728,7 +1747,8 @@
       renderRequerimento();
     },
     'open-efazenda': () => openEFazenda(),
-    'copy-efaz': async () => { if (await U.copy($('#efaz-text').value)) toast('Lista copiada.', 'ok'); },
+    'copy-efaz': async () => { if (await U.copy($('#efaz-text').value)) toast('Resumo copiado.', 'ok'); },
+    'export-efaz': () => { try { const n = R.exportarPedidoEFazenda(App.efazGrupos || []); toast(`Planilha do pedido gerada: ${n} linha(s).`, 'ok'); } catch (e) { toast('Erro: ' + h(e.message), 'err'); } },
     'add-company': () => { App.state.companies.push(newCompany({ razaoSocial: 'Nova empresa' })); commit(); toast('Empresa criada — preencha os dados no cartão.', 'ok'); },
     'rm-company': el => removeCompany(el.dataset.cid),
     'mva-add': () => { App.state.mvaTable.push({ id: U.uid(), cest: '', ncm: '', descricao: '', mvaOriginal: '', mva4: '', mva7: '', mva12: '', fonte: 'Informado pelo usuário' }); commit(); },

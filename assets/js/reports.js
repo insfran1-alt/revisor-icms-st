@@ -201,6 +201,122 @@
     return partes.join('\n\n');
   }
 
+  /* ---------------- Pedido no e-Fazenda (Informações Fiscais → Revisão de NF), no formato da tela ----------------
+   * Abas "Notas a Desvincular" (NF inteira) e "Notas a Alterar" (item a item), motivo da lista fixa do portal e
+   * os campos do quadro "Confirmação de Dados": Descrição (até 99 caracteres) e Justificativa (até 199). */
+  const LIM_DESC = 99, LIM_JUST = 199;
+  const MOTIVOS = {
+    ST_REMETENTE: 'Substituição Tributária - Remetente Inscrito como Substituto Tributário',
+    DIFAL: 'Diferencial de Alíquota à vista da operação',
+    ISENTO: 'Isento / Não Tributado',
+    INSCRICAO: 'Inscrição Divergente',
+    TERCEIROS: 'Remessa por Conta de Terceiros',
+    TVF: 'TVF / TA',
+    EXPORTACAO: 'Mercadoria destinada a Exportação',
+    GNRE: 'Tributo já recolhido por GNRE',
+    ERRO: 'Erro no cálculo do Tributo',
+    OUTROS: 'Outros'
+  };
+  const MOTIVO_DA_REGRA = {
+    NF_DEST: 'INSCRICAO', ST_RETIDO: 'ST_REMETENTE', EQ_ME: 'ISENTO', EQ_MEI: 'ISENTO', EQ_ME_VERIF: 'ISENTO',
+    ST_CALCULO: 'ERRO', ST_CREDITO: 'ERRO', ST_MVA_TAB: 'ERRO', ST_MVA_DIV: 'ERRO', ST_DESPESAS: 'ERRO', EQ_PERC: 'ERRO', EQ_CALCULO: 'ERRO', DUP_BASES: 'ERRO'
+  };
+  /** Corta no limite do campo, numa palavra inteira. */
+  function cortar(s, n) {
+    s = String(s || '').replace(/\s+/g, ' ').trim();
+    if (s.length <= n) return s;
+    const c = s.slice(0, n);
+    const i = c.lastIndexOf(' ');
+    return (i > n * 0.6 ? c.slice(0, i) : c).replace(/[\s,;:–-]+$/, '');
+  }
+  const semPontoFinal = s => String(s || '').trim().replace(/[.;]+$/, '');
+  /** Justificativa curta, escrita para a SEFAZ, de cada tipo de achado (com a norma principal). */
+  const CURTO = {
+    ST_USO: f => `Mercadoria para ${/degust|brinde|amostra/i.test(f.resumo) ? 'degustação/brinde' : 'uso e consumo'}, não revendida: ST indevida${f.valorDevido ? `; devido só o diferencial de alíquotas (${U.brl(f.valorDevido)})` : ''} (CF art. 150 §7º; LC 87/96 art. 10)`,
+    ST_INSUMO: f => `Insumo usado no preparo de alimentos, não revendido: ST indevida${f.valorDevido ? `; devida só a Equalização (${U.brl(f.valorDevido)})` : ''} (CF art. 150 §7º; Dec. 15.055/2018)`,
+    ST_SEM_CEST: () => 'NF sem CEST e produto que não corresponde a item do Subanexo I do Anexo III do RICMS/MS: não sujeito à ST (Conv. ICMS 142/2018, cl. 7ª)',
+    ST_FORA_TAB: f => `NCM ${U.fmtNCM(f.ncm)} fora do Subanexo I do Anexo III do RICMS/MS: mercadoria não sujeita à ST (Conv. ICMS 142/2018, cl. 7ª)`,
+    DUP_ST_EQ: () => 'Mesmo item cobrado na ST e na Equalização; a Equalização não se aplica a mercadoria sujeita à ST (Dec. 15.055/2018, art. 3º, §1º, II, a)',
+    DUP_ITEM: () => 'Linha repetida na memória de cálculo: o mesmo item foi cobrado mais de uma vez (CTN, art. 165)',
+    DUP_PERIODO: f => `${semPontoFinal(f.resumo)}: mesmo fato gerador cobrado duas vezes (CTN, art. 165)`
+  };
+  /** Texto curto de um achado: o resumo e a norma principal. */
+  function curto(f) {
+    if (CURTO[f.ruleId]) return CURTO[f.ruleId](f);
+    const cit = (global.RST_LEGAL.citacoes(f.baseLegal || [])[0] || '');
+    return `${semPontoFinal(f.resumo)}${cit ? ` (${cit})` : ''}`;
+  }
+
+  function camposPedido(fs, valor) {
+    const ord = fs.slice().sort((a, b) => b.valorRevisar - a.valorRevisar);
+    const principal = ord[0];
+    const motivoKey = MOTIVO_DA_REGRA[principal.ruleId] || 'OUTROS';
+    const descricao = cortar(`${principal.regra}${ord.length > 1 ? ` e mais ${ord.length - 1}` : ''}. Excluir ${U.brl(valor)}`, LIM_DESC);
+    // junta achados inteiros enquanto couberem; só o primeiro pode ser cortado
+    let justificativa = '';
+    U.uniq(ord.map(curto)).forEach((t, i) => {
+      const prox = justificativa ? `${justificativa}; ${t}` : t;
+      if (i === 0) justificativa = cortar(prox, LIM_JUST - 1);
+      else if (prox.length + 1 <= LIM_JUST) justificativa = prox;
+    });
+    justificativa = semPontoFinal(justificativa) + '.';
+    return { motivo: MOTIVOS[motivoKey], motivoKey, descricao, justificativa };
+  }
+
+  function pedidoEFazenda(model, findings) {
+    const ativos = findings.filter(f => f.valorRevisar > 0 && !['descartado', 'indeferido'].includes(f.status));
+    const cons = consolidar(model, ativos);
+    const grupos = U.groupBy(cons, x => `${x.ch.companyId}|${x.ch.referencia}|${x.ch.tipo}`);
+    return Object.values(grupos).map(lista => {
+      const ch0 = lista[0].ch;
+      const c = model.companies.get(ch0.companyId) || {};
+      const desvincular = [], alterar = [];
+      lista.forEach(x => {
+        const ch = x.ch, nf = model.nfsByKey.get(ch.nfKey);
+        const base = { numero: ch.numero, cnpj: ch.cnpjRemetente, razao: (nf && nf.remetenteNome) || '', uf: ch.ufRemetente || '', emissao: ch.dataEmissao, icmsNF: ch.valorICMS };
+        const daNota = x.findings.filter(f => f.escopo === 'nota');
+        if (daNota.some(f => f.integral)) { // motivo da nota inteira (devolução, cancelamento, outro destinatário, ME isenta…)
+          const fsN = daNota.filter(f => f.integral);
+          desvincular.push(Object.assign(base, { revisar: ch.valorICMS }, camposPedido(fsN.length ? fsN : x.findings, ch.valorICMS)));
+          return;
+        }
+        const porItem = U.groupBy(x.findings.filter(f => f.escopo === 'item'), f => f.itemId);
+        const itens = Object.entries(porItem).map(([itemId, ifs]) => {
+          const it = model.itemsById.get(itemId) || {};
+          const rev = U.round2(Math.min(it.icms || 0, U.sum(ifs, f => f.valorRevisar)));
+          return Object.assign({ ncm: it.ncm || '', descricaoItem: it.descricao || '', valorTotal: it.valorTotal || 0, icms: it.icms || 0, revisar: rev }, camposPedido(ifs, rev));
+        }).sort((a, b) => b.revisar - a.revisar);
+        // achado da nota sem item (ex.: bases acima do valor da NF): vai como linha da própria nota
+        daNota.forEach(f => itens.push(Object.assign({ ncm: '', descricaoItem: '(nota inteira)', valorTotal: ch.valorNF || 0, icms: ch.valorICMS, revisar: f.valorRevisar }, camposPedido([f], f.valorRevisar))));
+        if (itens.length) alterar.push(Object.assign(base, { revisar: U.round2(x.total), itens }));
+      });
+      return {
+        empresa: nomeEmpresa(c), ie: c.ie || '', cnpjEmpresa: c.cnpj || '', referencia: ch0.referencia, tipo: ch0.tipo, tributoCodigo: ch0.tributoCodigo,
+        desvincular: desvincular.sort((a, b) => b.revisar - a.revisar), alterar: alterar.sort((a, b) => b.revisar - a.revisar),
+        total: U.round2(U.sum(lista, x => x.total))
+      };
+    }).sort((a, b) => String(b.referencia).localeCompare(String(a.referencia)) || a.empresa.localeCompare(b.empresa));
+  }
+
+  /** Planilha do pedido: uma linha por NF a desvincular e por item a alterar, com os campos da tela. */
+  function exportarPedidoEFazenda(grupos) {
+    const X = global.XLSX;
+    const linhas = [];
+    grupos.forEach(g => {
+      const comum = { 'Empresa': g.empresa, 'IE': g.ie, 'Referência': U.refLabel(g.referencia), 'Tributo': `${g.tributoCodigo} - ${tribNome(g.tipo)}` };
+      g.desvincular.forEach(n => linhas.push(Object.assign({}, comum, { 'Aba': 'Notas a Desvincular', 'NF': n.numero, 'CNPJ do remetente': U.fmtCNPJ(n.cnpj), 'Fornecedor': n.razao, 'NCM/SH': '', 'Descrição do item': '', 'Vlr total': '', 'Valor ICMS': n.icmsNF, 'A revisar': n.revisar, 'Motivo': n.motivo, 'Descrição (até 99)': n.descricao, 'Justificativa (até 199)': n.justificativa })));
+      g.alterar.forEach(n => n.itens.forEach(i => linhas.push(Object.assign({}, comum, { 'Aba': 'Notas a Alterar', 'NF': n.numero, 'CNPJ do remetente': U.fmtCNPJ(n.cnpj), 'Fornecedor': n.razao, 'NCM/SH': U.digits(i.ncm), 'Descrição do item': i.descricaoItem, 'Vlr total': i.valorTotal, 'Valor ICMS': i.icms, 'A revisar': i.revisar, 'Motivo': i.motivo, 'Descrição (até 99)': i.descricao, 'Justificativa (até 199)': i.justificativa }))));
+    });
+    const ws = X.utils.json_to_sheet(linhas.length ? linhas : [{ 'Aviso': 'Nada a revisar no filtro.' }]);
+    ws['!cols'] = [26, 11, 9, 24, 20, 9, 19, 26, 10, 40, 11, 11, 11, 34, 60, 90].map(w => ({ wch: w }));
+    setMoneyFormat(ws, [10, 11, 12]);
+    if (linhas.length) ws['!autofilter'] = { ref: ws['!ref'] };
+    const wb = X.utils.book_new();
+    X.utils.book_append_sheet(wb, ws, 'Pedido e-Fazenda');
+    X.writeFile(wb, `pedido-efazenda-${U.today()}.xlsx`);
+    return linhas.length;
+  }
+
   /* ---------------- Produtos com ST (PGDAS-D) ---------------- */
   function exportarProdutosST(model, companyId) {
     const X = global.XLSX;
@@ -354,5 +470,5 @@
     return { linhas: aoa.length - 1 };
   }
 
-  global.RST_REPORTS = { consolidar, exportarExcel, requerimentoHTML, baixarWord, imprimirHTML, listaEFazenda, exportarProdutosST, produtosSOSReforma, exportarSOSReforma, exportarItens, exportarMemoria, wrapDoc, CSS_DOC };
+  global.RST_REPORTS = { consolidar, exportarExcel, requerimentoHTML, baixarWord, imprimirHTML, listaEFazenda, pedidoEFazenda, exportarPedidoEFazenda, LIM_DESC, LIM_JUST, exportarProdutosST, produtosSOSReforma, exportarSOSReforma, exportarItens, exportarMemoria, wrapDoc, CSS_DOC };
 })(window);
