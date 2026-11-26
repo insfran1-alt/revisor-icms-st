@@ -533,6 +533,7 @@
           <button class="btn sm" type="button" data-act="open-req">${ic('doc')} Requerimento</button>
           <button class="btn sm" type="button" data-act="open-efazenda" title="Lista das NFs para o pedido no e-Fazenda">${ic('list')} Lista e-Fazenda</button>
           <button class="btn sm" type="button" data-act="export-produtos" title="Produtos com ICMS-ST para segregar no PGDAS-D">${ic('download')} Produtos c/ ST</button>
+          <button class="btn sm" type="button" data-act="export-sos" title="Relação dos itens no modelo do SOS Reforma (CNPJ, NCM, Descrição, GTIN, Código do Produto)">${ic('download')} SOS Reforma</button>
           <button class="btn sm ghost" type="button" data-act="print" title="Imprimir esta lista">${ic('printer')}</button>
         </div></div>
       ${selN ? `<div class="bulk"><b>${selN} selecionado(s)</b> — marcar como:
@@ -920,6 +921,18 @@
     </div>`;
   }
 
+  /** Relação dos itens no modelo do SOS Reforma — uma planilha por empresa, no escopo do topo (empresa e referência). */
+  function exportarSOS() {
+    try {
+      const res = R.exportarSOSReforma(App.model, App.ui.empresa, App.ui.ref);
+      if (!res.length) return toast('Nenhum item de ST ou de Equalização na empresa e referência escolhidas no topo.', 'err', 6000);
+      const ok = res.filter(r => !r.erro), semCnpj = res.filter(r => r.erro);
+      const partes = ok.map(r => `${r.empresa}: ${r.produtos} produto(s)${r.ncmIncompleto ? `, ${r.ncmIncompleto} com NCM incompleto` : ''}`);
+      if (semCnpj.length) partes.push(`não exportado, empresa sem CNPJ: ${semCnpj.map(r => r.empresa).join(', ')} (importe o cartão CNPJ ou informe o CNPJ em Empresas)`);
+      toast(h(`${ok.length ? 'Relação para o SOS Reforma gerada — ' : ''}${partes.join(' · ')}.`), ok.length ? 'ok' : 'err', 9000);
+    } catch (e) { toast('Erro: ' + h(e.message), 'err'); }
+  }
+
   async function importarSubanexo() {
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = '.docx,.doc';
@@ -1062,6 +1075,7 @@
           <li>Opcional: <b>XML das NF-e</b> — confirma ICMS-ST já retido pelo fornecedor, destinatário, CEST e linhas repetidas.</li>
           <li>Abra <b>Revisão</b>: filtre, confira cada achado, ajuste a destinação dos produtos e marque o status.</li>
           <li>Gere o <b>Excel</b> (com base legal e fundamentação), o <b>requerimento</b> (Word/PDF) e a <b>lista para o e-Fazenda</b>.</li>
+          <li>Botão <b>SOS Reforma</b> (tela Revisão): gera a relação dos produtos no modelo do SOS Reforma — CNPJ, NCM, Descrição, GTIN e Código do Produto, um produto por linha — para conferir NCM e classificação. Vale a empresa e a referência escolhidas no topo; a empresa precisa ter CNPJ cadastrado.</li>
         </ol>
         <h3>Relação oficial de mercadorias com ST</h3>
         <p>O app traz a relação do <b>Subanexo I do Anexo III do RICMS/MS</b> (CEST, NCM, descrição e MVA original e ajustada a 4%, 7% e 12%). Com ela, confere a MVA aplicada pela SEFAZ em cada item de ST, aponta mercadoria fora da lista e mostra a descrição oficial para comparar com o produto. Item sem CEST na nota é procurado pelo NCM, valendo o item de classificação mais específica. Para usar uma versão mais nova, salve o Subanexo como .docx no Word e importe em <i>Tabelas e regras</i>.</p>
@@ -1234,6 +1248,7 @@
       try { R.exportarExcel(App.model, list, `revisao-icms-st${App.ui.ref ? '-' + App.ui.ref : ''}-${U.today()}.xlsx`); toast(`Planilha gerada com ${list.length} achado(s).`, 'ok'); }
       catch (e) { toast('Não foi possível gerar a planilha: ' + h(e.message), 'err'); }
     },
+    'export-sos': () => exportarSOS(),
     'export-produtos': () => { try { const n = R.exportarProdutosST(App.model, App.ui.empresa); toast(`Lista com ${n} produto(s) com ICMS-ST gerada.`, 'ok'); } catch (e) { toast('Erro: ' + h(e.message), 'err'); } },
     'print': () => global.print(),
     'open-req': el => openRequerimento({ companyId: el.dataset.cid || App.ui.empresa || '', referencia: el.dataset.ref || App.ui.ref || '' }),

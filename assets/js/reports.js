@@ -224,5 +224,64 @@
     return linhas.length;
   }
 
-  global.RST_REPORTS = { consolidar, exportarExcel, requerimentoHTML, baixarWord, imprimirHTML, listaEFazenda, exportarProdutosST, wrapDoc, CSS_DOC };
+  /* ---------------- Relação de itens para o SOS Reforma ----------------
+   * Modelo do SOS Reforma: uma aba ("Sheet1") com CNPJ | NCM | Descrição | GTIN | Código do Produto — um produto por linha. */
+  const gtinValido = g => { const d = U.digits(g); return [8, 12, 13, 14].includes(d.length) && !/^0+$/.test(d) ? d : ''; };
+
+  /** Produtos (sem repetição) dos itens de ST e Equalização no escopo; o XML da NF-e, quando houver, completa descrição, GTIN e código. */
+  function produtosSOSReforma(model, companyId, referencia) {
+    const itens = model.items.filter(i => (i.tipo === 'ST' || i.tipo === 'EQ') && i.companyId && (!companyId || i.companyId === companyId) && (!referencia || i.referencia === referencia));
+    const prods = new Map();
+    itens.forEach(i => {
+      const x = i.xmlItem || null;
+      const gtin = gtinValido(x && x.gtin) || gtinValido(i.gtin);
+      const ncm = U.digits((x && x.ncm) || i.ncm);
+      const desc = String((x && x.descricao) || i.descricao || '').replace(/\s+/g, ' ').trim();
+      const cProd = x && x.cProd ? String(x.cProd).trim() : '';
+      const id = gtin ? `G${gtin}` : cProd ? `P${U.digits(i.cnpjRemetente)}:${cProd}` : `D${U.normKey(desc).slice(0, 60)}|${ncm}`;
+      const chave = `${i.companyId}|${id}`;
+      let p = prods.get(chave);
+      if (!p) { p = { companyId: i.companyId, id, ncm, desc, gtin, cProd, remetente: U.digits(i.cnpjRemetente), tipos: new Set(), nfs: new Set() }; prods.set(chave, p); }
+      if (ncm.length > p.ncm.length) p.ncm = ncm;      // NCM completo prevalece sobre o cortado
+      if (desc.length > p.desc.length) p.desc = desc;  // descrição completa prevalece sobre a abreviada
+      if (!p.gtin && gtin) p.gtin = gtin;
+      if (!p.cProd && cProd) p.cProd = cProd;
+      p.tipos.add(i.tipo); p.nfs.add(i.numero);
+    });
+    const lista = [...prods.values()];
+    // código do produto: o da NF-e (XML); repetido entre produtos diferentes, ganha o final do CNPJ do fornecedor;
+    // sem XML, um código fixo gerado a partir do produto (o mesmo a cada exportação)
+    const usos = U.groupBy(lista.filter(p => p.cProd), p => `${p.companyId}|${p.cProd}`);
+    lista.forEach(p => {
+      const naDescricao = (p.desc.match(/^(\d{3,7})\s*-\s*(?=\S)/) || [])[1]; // "3377 - Sacola…": código do fornecedor na descrição
+      if (p.cProd) p.codigo = usos[`${p.companyId}|${p.cProd}`].length > 1 ? `${p.cProd}-${p.remetente.slice(4, 8)}` : p.cProd;
+      else if (naDescricao) p.codigo = naDescricao;
+      else p.codigo = 'R' + U.hashText(p.id).toUpperCase();
+    });
+    return lista.sort((a, b) => a.desc.localeCompare(b.desc, 'pt-BR'));
+  }
+
+  /** Gera uma planilha por empresa no modelo do SOS Reforma. Devolve o resumo por empresa. */
+  function exportarSOSReforma(model, companyId, referencia) {
+    const X = global.XLSX;
+    const prods = produtosSOSReforma(model, companyId, referencia);
+    const porEmpresa = U.groupBy(prods, p => p.companyId);
+    const resumo = [];
+    Object.entries(porEmpresa).forEach(([cid, lista]) => {
+      const c = model.companies.get(cid);
+      const cnpj = U.digits(c && c.cnpj);
+      if (cnpj.length !== 14) { resumo.push({ empresa: nomeEmpresa(c), erro: 'sem CNPJ' }); return; }
+      const aoa = [['CNPJ', 'NCM', 'Descrição', 'GTIN', 'Código do Produto']].concat(lista.map(p => [cnpj, p.ncm, p.desc, p.gtin, p.codigo]));
+      const ws = X.utils.aoa_to_sheet(aoa); // tudo como texto: preserva zeros à esquerda (NCM, CNPJ, GTIN)
+      ws['!cols'] = [16, 11, 70, 16, 18].map(w => ({ wch: w }));
+      const wb = X.utils.book_new();
+      X.utils.book_append_sheet(wb, ws, 'Sheet1');
+      const nome = `SOS Reforma - ${nomeEmpresa(c).replace(/[\\/:*?"<>|]+/g, ' ').trim()}${referencia ? ' - ' + U.refLabel(referencia).replace('/', '-') : ''} - itens.xlsx`;
+      X.writeFile(wb, nome);
+      resumo.push({ empresa: nomeEmpresa(c), produtos: lista.length, semGtin: lista.filter(p => !p.gtin).length, ncmIncompleto: lista.filter(p => p.ncm.length !== 8).length, arquivo: nome });
+    });
+    return resumo;
+  }
+
+  global.RST_REPORTS = { consolidar, exportarExcel, requerimentoHTML, baixarWord, imprimirHTML, listaEFazenda, exportarProdutosST, produtosSOSReforma, exportarSOSReforma, wrapDoc, CSS_DOC };
 })(window);
