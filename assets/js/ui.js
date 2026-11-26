@@ -31,6 +31,9 @@
     logo: '<path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/><path d="M13 3v5h5v2"/><circle cx="16.5" cy="16.5" r="3.5"/><path d="M19 19l2.5 2.5"/>',
     save: '<path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M8 3v5h7M8 21v-7h8v7"/>',
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    chevrons: '<path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>',
+    chevron: '<path d="M9 6l6 6-6 6"/>',
+    layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
     moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'
   };
   const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
@@ -53,7 +56,8 @@
     return {
       view: 'painel', empresa: '', ref: '',
       rev: { q: '', tipo: '', forca: ['forte', 'moderada', 'atencao'], regra: '', status: '', uf: '', min: '', page: 1, sort: 'forca' },
-      notas: { q: '', tipo: '', achados: false, page: 1 },
+      notas: { q: '', tipo: '', achados: false, page: 1, modo: 'notas' },
+      itens: { q: '', tipo: '', revisao: '', agrupar: '', ordem: 'az', page: 1, abertos: [] },
       docs: { kind: '' }
     };
   }
@@ -75,7 +79,7 @@
     setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 320); }, ms);
   }
 
-  const savePrefs = U.debounce(() => ST.prefSet('ui', { view: App.ui.view, empresa: App.ui.empresa, ref: App.ui.ref, rev: Object.assign({}, App.ui.rev, { page: 1 }), notas: Object.assign({}, App.ui.notas, { page: 1 }) }), 300);
+  const savePrefs = U.debounce(() => ST.prefSet('ui', { view: App.ui.view, empresa: App.ui.empresa, ref: App.ui.ref, rev: Object.assign({}, App.ui.rev, { page: 1 }), notas: Object.assign({}, App.ui.notas, { page: 1 }), itens: Object.assign({}, App.ui.itens, { page: 1, abertos: [] }) }), 300);
   const persist = U.debounce(() => ST.save(App.state).then(updateStorageInfo), 350);
 
   function recompute() {
@@ -93,6 +97,18 @@
   function applyTheme(t) {
     if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
     else document.documentElement.removeAttribute('data-theme');
+  }
+  /* ---------- Menu lateral retrátil ---------- */
+  function aplicarMenu(recolhido) {
+    const app = $('.app');
+    if (app) app.classList.toggle('menu-recolhido', !!recolhido);
+    const b = $('#menu-toggle');
+    if (b) {
+      b.setAttribute('aria-expanded', recolhido ? 'false' : 'true');
+      b.title = recolhido ? 'Expandir menu' : 'Recolher menu';
+      const lbl = b.querySelector('.lbl');
+      if (lbl) lbl.textContent = recolhido ? 'Expandir menu' : 'Recolher menu';
+    }
   }
   function effectiveTheme() {
     const t = document.documentElement.getAttribute('data-theme');
@@ -112,7 +128,7 @@
     const fn = { painel: viewPainel, importar: viewImportar, revisao: viewRevisao, notas: viewNotas, empresas: viewEmpresas, tabelas: viewTabelas, ajuda: viewAjuda }[v.id];
     $('#view').innerHTML = fn();
     if (v.id === 'revisao') renderRevResults();
-    if (v.id === 'notas') renderNotasResults();
+    if (v.id === 'notas') { if (App.ui.notas.modo === 'itens') renderItensResults(); else renderNotasResults(); }
     updateStorageInfo();
   }
 
@@ -659,7 +675,7 @@
     commit({ render: false });
     renderNav();
     if (App.ui.view === 'revisao') renderRevResults();
-    if (App.ui.view === 'notas') renderNotasResults();
+    if (App.ui.view === 'notas') { if (App.ui.notas.modo === 'itens') renderItensResults(); else renderNotasResults(); }
     toast(el.value ? `Destinação "${L.DESTINACOES[el.value]}" registrada para este produto.` : 'Destinação voltou para automático.', 'ok');
     const dr = $('#drawer');
     if (dr.classList.contains('open') && dr.dataset.nf) openNF(dr.dataset.nf);
@@ -689,15 +705,162 @@
   }
 
   function viewNotas() {
+    const modo = App.ui.notas.modo === 'itens' ? 'itens' : 'notas';
+    const seletor = `<div class="chips" role="group" aria-label="Ver por">${[['notas', 'Notas'], ['itens', 'Itens']].map(([k, n]) => `<button type="button" class="chip ${modo === k ? 'on' : ''}" aria-pressed="${modo === k}" data-act="modo-notas" data-v="${k}">${n}</button>`).join('')}</div>`;
+    if (modo === 'itens') return viewItens(seletor);
     const f = App.ui.notas;
     return `<div class="card">
       <div class="toolbar">
+        ${seletor}
         <div class="search">${ic('search')}<input type="search" data-f="notas.q" value="${h(f.q)}" placeholder="Buscar NF, CNPJ, chave, produto, NCM…" aria-label="Buscar notas"></div>
         <select data-f="notas.tipo" aria-label="Tributo">${opt('', 'Todas as cobranças', f.tipo)}${opt('ST', 'Com ICMS-ST', f.tipo)}${opt('EQ', 'Com Equalização', f.tipo)}${opt('AMBOS', 'Cobradas nos dois (ST e EQ)', f.tipo)}</select>
         <label class="check small"><input type="checkbox" data-f="notas.achados" ${f.achados ? 'checked' : ''}> Somente com valor a revisar</label>
       </div>
       <div id="notas-results"></div>
     </div>`;
+  }
+
+  /* ---------- Itens: lista para conferência (filtro de revisão, agrupamento e exportação) ---------- */
+  const gtinDe = it => { const d = U.digits(it.gtin || (it.xmlItem && it.xmlItem.gtin)); return [8, 12, 13, 14].includes(d.length) && !/^0+$/.test(d) ? d : ''; };
+  /** Itens da relação oficial (Subanexo I) para o item: o do motor (ST) ou, na Equalização, uma busca pelo NCM. */
+  function oficialDe(it) {
+    if (it.oficial) return it.oficial;
+    const sub = App.model.subanexo;
+    if (!sub || !global.RST_SUB) return null;
+    if (!('_oficial' in it)) Object.defineProperty(it, '_oficial', { value: global.RST_SUB.buscarItem(sub, it.cest || it.cestXml, it.ncm), enumerable: false });
+    return it._oficial;
+  }
+  const subPrincipal = it => { const o = oficialDe(it); if (!o || !o.cands.length) return null; return ((o.especificos && o.especificos.length) ? o.especificos : o.cands)[0]; };
+  const lst = (a, n = 3) => a.slice(0, n).join(', ') + (a.length > n ? ` +${a.length - n}` : '');
+  /** Primeira letra minúscula, preservando siglas ("NCM", "GTIN", "CEST"). */
+  const inicialMin = s => /^[A-ZÀ-Ý]{2}/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1);
+
+  const AGRUPAR = {
+    descricao: { nome: 'Descrição', chave: r => U.normKey(r.it.descricao), rot: r => r.it.descricao },
+    ncm: { nome: 'NCM', chave: r => U.digits(r.it.ncm), rot: r => r.it.ncm ? 'NCM ' + U.fmtNCM(r.it.ncm) : 'Sem NCM' },
+    cest: { nome: 'CEST', chave: r => U.digits(r.it.cest), rot: r => U.fmtCEST(r.it.cest) ? 'CEST ' + U.fmtCEST(r.it.cest) : 'Sem CEST' },
+    ncmcest: { nome: 'NCM e CEST', chave: r => `${U.digits(r.it.ncm)}|${U.digits(r.it.cest)}`, rot: r => ncmCest(r.it.ncm, r.it.cest) || 'Sem NCM e CEST' },
+    gtin: { nome: 'GTIN', chave: r => gtinDe(r.it), rot: r => gtinDe(r.it) ? 'GTIN ' + gtinDe(r.it) : 'Sem GTIN' },
+    fornecedor: { nome: 'Fornecedor', chave: r => r.it.cnpjRemetente || '', rot: r => [(r.nf && r.nf.remetenteNome) || '', U.fmtCNPJ(r.it.cnpjRemetente) || 'Sem CNPJ', r.it.ufRemetente].filter(Boolean).join(' · ') },
+    nf: { nome: 'Nota fiscal', chave: r => r.it.nfKey, rot: r => `NF ${r.it.numero}${r.it.cnpjRemetente ? ' · ' + U.fmtCNPJ(r.it.cnpjRemetente) : ''}` },
+    tributo: { nome: 'Tributo', chave: r => r.it.tipo, rot: r => r.it.tipo === 'ST' ? 'ICMS-ST (333)' : 'Equalização (349)' },
+    referencia: { nome: 'Referência', chave: r => r.it.referencia || '', rot: r => 'Ref. ' + U.refLabel(r.it.referencia), sk: r => String(r.it.referencia || '') },
+    // na Equalização, o item da relação vem só pelo NCM: fica em grupo separado, para não se misturar com o que foi cobrado como ST
+    segmento: { nome: 'Segmento da ST', chave: r => { const e = subPrincipal(r.it); return `${r.it.tipo}:${e ? e.seg : '-'}`; }, rot: r => { const e = subPrincipal(r.it), sub = App.model.subanexo, nomeSeg = e ? `segmento ${e.seg} — ${(sub && sub.segmentos[e.seg]) || ''}` : ''; return r.it.tipo === 'EQ' ? (e ? `Equalização — NCM também aparece no ${nomeSeg}` : 'Equalização — NCM fora da relação de ST') : (e ? nomeSeg.charAt(0).toUpperCase() + nomeSeg.slice(1) : 'ICMS-ST — fora da relação de ST'); }, sk: r => { const e = subPrincipal(r.it); return `${r.it.tipo === 'EQ' ? 'Z' : 'A'}${e ? e.seg : '99'}`; } },
+    itemsub: { nome: 'Item do Subanexo I', chave: r => { const e = subPrincipal(r.it); return `${r.it.tipo}:${e ? e.cest : '-'}`; }, rot: r => { const e = subPrincipal(r.it), txt = e ? `item ${e.item} · CEST ${U.fmtCEST(e.cest)} — ${e.desc}` : ''; return r.it.tipo === 'EQ' ? (e ? `Equalização — NCM também aparece no ${txt}` : 'Equalização — NCM fora da relação de ST') : (e ? txt.charAt(0).toUpperCase() + txt.slice(1) : 'ICMS-ST — fora da relação de ST'); }, sk: r => { const e = subPrincipal(r.it); return `${r.it.tipo === 'EQ' ? 'Z' : 'A'}${e ? e.cest : '9999999'}`; } },
+    mva: { nome: 'MVA aplicada', chave: r => r.it.tipo === 'ST' && r.it.mvaAj !== null && r.it.mvaAj !== undefined ? U.fmt(r.it.mvaAj, 1) : 'x', rot: r => r.it.tipo === 'ST' ? (r.it.mvaAj === null || r.it.mvaAj === undefined ? 'MVA não calculada (pauta)' : 'MVA ' + U.fmt(r.it.mvaAj, 1) + '%') : 'Equalização (sem MVA)', sk: r => r.it.tipo === 'ST' && r.it.mvaAj !== null && r.it.mvaAj !== undefined ? r.it.mvaAj : 1e9 },
+    percentual: { nome: 'Percentual da Equalização', chave: r => r.it.tipo === 'EQ' ? String(r.it.percentual || 0) : 'x', rot: r => r.it.tipo === 'EQ' ? 'Percentual ' + U.pct(r.it.percentual || 0) : 'ICMS-ST (sem percentual)', sk: r => r.it.tipo === 'EQ' ? (r.it.percentual || 0) : 1e9 },
+    situacao: { nome: 'Situação na revisão', chave: r => r.forca || 'sem', rot: r => r.forca ? L.FORCAS[r.forca].nome : 'Sem apontamento', sk: r => r.forca ? L.FORCAS[r.forca].ordem : 9 }
+  };
+
+  /** Itens no escopo (empresa e referência do topo) com os achados ativos e o valor a revisar de cada um. */
+  function itemRows() {
+    const m = App.model, f = App.ui.itens, q = U.norm(f.q);
+    const ativos = m.findings.filter(x => inScope(x) && !['descartado', 'indeferido'].includes(x.status));
+    const porItem = U.groupBy(ativos.filter(x => x.itemId), x => x.itemId);
+    const porCobranca = U.groupBy(ativos.filter(x => !x.itemId), x => x.chargeId);
+    return m.items.filter(inScope).map(it => {
+      const fsI = porItem[it.id] || [], fsN = porCobranca[it.chargeId] || [];
+      const fs = fsI.concat(fsN); // achado da NF inteira (ex.: devolução, ME isenta) vale para todos os itens dela
+      const forca = fs.length ? fs.map(x => x.forca).sort((a, b) => L.FORCAS[a].ordem - L.FORCAS[b].ordem)[0] : '';
+      const icms = it.icms || 0;
+      const rev = U.round2(fsN.some(x => x.integral) ? icms : Math.min(icms, U.sum(fsI, x => x.valorRevisar)));
+      return { it, fs, forca, rev, nf: m.nfsByKey.get(it.nfKey) };
+    }).filter(r => (!f.tipo || r.it.tipo === f.tipo)
+      && (!f.revisao || (f.revisao === 'com' ? r.fs.length > 0 : f.revisao === 'valor' ? r.rev > 0 : r.fs.length === 0))
+      && (!q || U.norm([r.it.descricao, r.it.ncm, U.fmtNCM(r.it.ncm), r.it.cest, U.fmtCEST(r.it.cest), gtinDe(r.it), 'NF ' + r.it.numero, r.it.cnpjRemetente, U.fmtCNPJ(r.it.cnpjRemetente), r.nf && r.nf.remetenteNome].filter(Boolean).join(' ')).includes(q)));
+  }
+
+  const ordenar = (lista, ordem, rotulo, icms, rev, sk) => lista.sort((a, b) => ordem === 'icms' ? icms(b) - icms(a)
+    : ordem === 'rev' ? (rev(b) - rev(a)) || (icms(b) - icms(a))
+      : (sk && typeof sk(a) === 'number' ? sk(a) - sk(b) : String(sk ? sk(a) : rotulo(a)).localeCompare(String(sk ? sk(b) : rotulo(b)), 'pt-BR', { numeric: true })));
+
+  function agruparItens(rows, crit) {
+    const A = AGRUPAR[crit];
+    const mapa = new Map();
+    rows.forEach(r => { const k = A.chave(r); let g = mapa.get(k); if (!g) { g = { k: `${crit}:${k}`, rot: A.rot(r), sk: A.sk ? A.sk(r) : null, rows: [] }; mapa.set(k, g); } g.rows.push(r); });
+    const lista = [...mapa.values()].map(g => Object.assign(g, {
+      itens: g.rows.length, nfs: U.uniq(g.rows.map(r => r.it.nfKey)).length,
+      valor: U.round2(U.sum(g.rows, r => r.it.valorTotal)), icms: U.round2(U.sum(g.rows, r => r.it.icms)), rev: U.round2(U.sum(g.rows, r => r.rev)),
+      comAchado: g.rows.filter(r => r.fs.length).length,
+      ncms: U.uniq(g.rows.map(r => U.fmtNCM(r.it.ncm)).filter(Boolean)), cests: U.uniq(g.rows.map(r => U.fmtCEST(r.it.cest)).filter(Boolean)),
+      descs: U.uniq(g.rows.map(r => r.it.descricao)),
+      mvas: U.uniq(g.rows.filter(r => r.it.tipo === 'ST' && r.it.mvaAj !== null && r.it.mvaAj !== undefined).map(r => U.fmt(r.it.mvaAj, 2) + '%')),
+      tipos: U.uniq(g.rows.map(r => r.it.tipo))
+    }));
+    return ordenar(lista, App.ui.itens.ordem, g => g.rot, g => g.icms, g => g.rev, A.sk ? g => g.sk : null);
+  }
+
+  function viewItens(seletor) {
+    const f = App.ui.itens;
+    return `<div class="card">
+      <div class="toolbar">
+        ${seletor}
+        <div class="search">${ic('search')}<input type="search" data-f="itens.q" value="${h(f.q)}" placeholder="Buscar produto, NCM, CEST, GTIN, NF, fornecedor…" aria-label="Buscar itens"></div>
+        <select data-f="itens.tipo" aria-label="Tributo">${opt('', 'ST e Equalização', f.tipo)}${opt('ST', 'ICMS-ST', f.tipo)}${opt('EQ', 'Equalização', f.tipo)}</select>
+        <select data-f="itens.revisao" aria-label="Revisão">${opt('', 'Todos os itens', f.revisao)}${opt('com', 'Para revisão (com achado)', f.revisao)}${opt('valor', 'Com valor a revisar', f.revisao)}${opt('sem', 'Sem apontamento', f.revisao)}</select>
+        <select data-f="itens.agrupar" aria-label="Agrupar">${opt('', 'Sem agrupar', f.agrupar)}${Object.entries(AGRUPAR).map(([k, a]) => opt(k, 'Agrupar por ' + inicialMin(a.nome), f.agrupar)).join('')}</select>
+        <select data-f="itens.ordem" aria-label="Ordenar">${opt('az', 'Ordem alfabética', f.ordem)}${opt('icms', 'Maior ICMS cobrado', f.ordem)}${opt('rev', 'Maior valor a revisar', f.ordem)}</select>
+      </div>
+      <div id="itens-results"></div>
+    </div>`;
+  }
+
+  function revisaoCel(r) {
+    if (!r.fs.length) return '<span class="sub">—</span>';
+    const regras = U.uniq(r.fs.map(x => L.REGRAS[x.ruleId].nome));
+    return `<span title="${h(regras.join('\n'))}">${forcaPill(r.forca)}${regras.length > 1 ? ` <span class="sub">+${regras.length - 1}</span>` : ''}</span><div class="sub">${h(regras[0])}</div>`;
+  }
+  const mvaOuPerc = it => it.tipo === 'ST' ? (it.mvaAj === null || it.mvaAj === undefined ? '—' : U.pct(it.mvaAj)) : U.pct(it.percentual || 0);
+
+  function tabelaItens(slice) {
+    return `<thead><tr><th>NF</th><th>Item</th><th>Fornecedor</th><th class="num">Mercadoria</th><th class="num">Base</th><th class="num">MVA / %</th><th class="num">ICMS cobrado</th><th class="num">A revisar</th><th>Revisão</th></tr></thead>
+      <tbody>${slice.length ? slice.map(r => { const it = r.it; return `<tr class="click" data-nf="${h(it.nfKey)}" tabindex="0">
+        <td class="nowrap"><b>${h(it.numero)}</b><div class="sub">${tipoPill(it.tipo)} ${h(U.refLabel(it.referencia))}</div></td>
+        <td class="desc"><div class="small strong">${h(it.descricao)}</div><div class="sub">${h([ncmCest(it.ncm, it.cest), gtinDe(it) ? 'GTIN ' + gtinDe(it) : ''].filter(Boolean).join(' · ') || 'sem NCM')}</div></td>
+        <td class="small">${h((r.nf && r.nf.remetenteNome) || U.fmtCNPJ(it.cnpjRemetente) || '—')}<div class="sub">${h(it.ufRemetente || '')}</div></td>
+        <td class="num">${U.brl(it.valorTotal)}</td><td class="num">${U.brl(it.base)}</td><td class="num">${mvaOuPerc(it)}</td>
+        <td class="num strong">${U.brl(it.icms)}</td><td class="num">${r.rev ? U.brl(r.rev) : '<span class="sub">—</span>'}</td><td>${revisaoCel(r)}</td></tr>`; }).join('')
+      : '<tr class="empty-row"><td colspan="9">Nenhum item no filtro.</td></tr>'}</tbody>`;
+  }
+
+  function tabelaGrupos(slice, crit) {
+    const abertos = new Set(App.ui.itens.abertos);
+    const nome = AGRUPAR[crit].nome;
+    return `<thead><tr><th>${h(nome)}</th><th class="num">Itens</th><th class="num">NFs</th><th>Detalhe</th><th class="num">Mercadoria</th><th class="num">ICMS cobrado</th><th class="num">A revisar</th><th>Revisão</th></tr></thead>
+      <tbody>${slice.length ? slice.map(g => {
+        const aberto = abertos.has(g.k);
+        const det = [!['ncm', 'ncmcest'].includes(crit) && g.ncms.length ? 'NCM ' + lst(g.ncms) : '', !['cest', 'ncmcest'].includes(crit) && g.cests.length ? 'CEST ' + lst(g.cests) : '', crit !== 'mva' && g.mvas.length ? 'MVA ' + lst(g.mvas) : ''].filter(Boolean).join(' · ');
+        const descs = crit !== 'descricao' ? g.descs.slice(0, 2).join(' | ') + (g.descs.length > 2 ? ` +${g.descs.length - 2}` : '') : '';
+        return `<tr class="grp">
+          <td class="desc"><button type="button" class="btn sm ghost icon-toggle" data-act="toggle-grupo" data-k="${h(g.k)}" aria-expanded="${aberto}" title="${aberto ? 'Ocultar' : 'Mostrar'} os itens">${ic('chevron', aberto ? 'rot90' : '')}</button><b class="small">${h(g.rot)}</b> ${g.tipos.map(t => tipoPill(t)).join(' ')}</td>
+          <td class="num">${g.itens}</td><td class="num">${g.nfs}</td>
+          <td class="small">${h(det)}${descs ? `<div class="sub">${h(descs)}</div>` : ''}</td>
+          <td class="num">${U.brl(g.valor)}</td><td class="num strong">${U.brl(g.icms)}</td><td class="num">${g.rev ? U.brl(g.rev) : '<span class="sub">—</span>'}</td>
+          <td class="nowrap">${g.comAchado ? `<span class="pill moderada">${g.comAchado} com achado</span>` : '<span class="sub">—</span>'}</td></tr>
+          ${aberto ? g.rows.map(r => { const it = r.it; return `<tr class="click sub-row" data-nf="${h(it.nfKey)}" tabindex="0">
+            <td class="desc"><div class="small">${h(it.descricao)}</div><div class="sub">NF ${h(it.numero)} · ${h(U.refLabel(it.referencia))} · ${h([ncmCest(it.ncm, it.cest), gtinDe(it) ? 'GTIN ' + gtinDe(it) : ''].filter(Boolean).join(' · '))}</div></td>
+            <td class="num">${tipoPill(it.tipo)}</td><td></td><td class="small">${h((r.nf && r.nf.remetenteNome) || U.fmtCNPJ(it.cnpjRemetente) || '')}<div class="sub">${it.tipo === 'ST' ? 'MVA' : 'Percentual'} ${mvaOuPerc(it)}</div></td>
+            <td class="num">${U.brl(it.valorTotal)}</td><td class="num">${U.brl(it.icms)}</td><td class="num">${r.rev ? U.brl(r.rev) : '<span class="sub">—</span>'}</td><td>${revisaoCel(r)}</td></tr>`; }).join('') : ''}`;
+      }).join('') : '<tr class="empty-row"><td colspan="8">Nenhum item no filtro.</td></tr>'}</tbody>`;
+  }
+
+  function renderItensResults() {
+    const box = $('#itens-results');
+    if (!box) return;
+    const f = App.ui.itens;
+    if (f.agrupar && !AGRUPAR[f.agrupar]) f.agrupar = '';
+    const crit = f.agrupar;
+    const rows = itemRows();
+    const unidades = crit ? agruparItens(rows, crit) : ordenar(rows.slice(), f.ordem, r => r.it.descricao, r => r.it.icms || 0, r => r.rev);
+    const pages = Math.max(1, Math.ceil(unidades.length / PAGE));
+    if (f.page > pages) f.page = pages;
+    const slice = unidades.slice((f.page - 1) * PAGE, f.page * PAGE);
+    const com = rows.filter(r => r.fs.length).length;
+    box.innerHTML = `<div class="sumline"><b>${crit ? `${unidades.length} grupo(s)` : `${rows.length} item(ns)`}</b><span class="muted small">· ${crit ? `${rows.length} itens · ` : ''}${com} com achado · ICMS cobrado ${U.brl(U.sum(rows, r => r.it.icms))} · a revisar ${U.brl(U.sum(rows, r => r.rev))}</span>
+        <div class="sp"><button class="btn sm" type="button" data-act="export-itens" title="Planilha com ${crit ? 'o agrupamento e ' : ''}os itens desta lista">${ic('download')} Excel</button></div></div>
+      <div class="table-wrap"><table class="data">${crit ? tabelaGrupos(slice, crit) : tabelaItens(slice)}</table></div>
+      ${pages > 1 ? `<div class="pager">Página ${f.page} de ${pages}<button class="btn sm" type="button" data-act="page" data-t="itens" data-p="${f.page - 1}" ${f.page <= 1 ? 'disabled' : ''}>Anterior</button><button class="btn sm" type="button" data-act="page" data-t="itens" data-p="${f.page + 1}" ${f.page >= pages ? 'disabled' : ''}>Próxima</button></div>` : ''}`;
   }
 
   function coverBar(r) {
@@ -794,7 +957,7 @@
     if (!cur.situacao && !cur.obs) delete App.state.noteFlags[key]; else App.state.noteFlags[key] = cur;
     commit({ render: false });
     renderNav();
-    if (App.ui.view === 'notas') renderNotasResults();
+    if (App.ui.view === 'notas') { if (App.ui.notas.modo === 'itens') renderItensResults(); else renderNotasResults(); }
     if (App.ui.view === 'revisao') renderRevResults();
     if (el.dataset.nfflag === 'situacao') toast(el.value ? 'Situação registrada: a NF entrou na lista de revisão.' : 'Situação normal restaurada.', 'ok');
   }
@@ -1074,6 +1237,7 @@
           <li><b>Memória de cálculo de cada NF</b>: para a Equalização, copie as páginas da tela "Dados da Nota" (cabeçalho da nota e tabela, 15 itens por página) e cole uma abaixo da outra no Excel — ou direto em <i>Importar → Colar a tabela</i>; o PDF da tela também serve, um arquivo por página. O app junta as páginas pela numeração "Visualizando 1 - 15 de N", ignora página repetida e avisa se faltar alguma. Para o ST, copie a tabela do portal e cole em <i>Importar → Colar a tabela</i> (ou salve em planilha com o nº da NF no nome, ex.: <i>NOTA 19192.xlsx</i>).</li>
           <li>Opcional: <b>XML das NF-e</b> — confirma ICMS-ST já retido pelo fornecedor, destinatário, CEST e linhas repetidas.</li>
           <li>Abra <b>Revisão</b>: filtre, confira cada achado, ajuste a destinação dos produtos e marque o status.</li>
+          <li>Em <b>Notas e itens → Itens</b>: veja todos os itens cobrados, filtre os que são para revisão ou os sem apontamento e agrupe por descrição, NCM, CEST, NCM e CEST, GTIN, fornecedor, nota, segmento ou item do Subanexo I, MVA e outros — cada grupo mostra itens, notas e valores e abre a lista de itens. O botão <b>Excel</b> leva a lista (e o agrupamento) para conferir em outros portais, como a Econet.</li>
           <li>Gere o <b>Excel</b> (com base legal e fundamentação), o <b>requerimento</b> (Word/PDF) e a <b>lista para o e-Fazenda</b>.</li>
           <li>Botão <b>SOS Reforma</b> (tela Revisão): gera a relação dos produtos no modelo do SOS Reforma — CNPJ, NCM, Descrição, GTIN e Código do Produto, um produto por linha — para conferir NCM e classificação. Vale a empresa e a referência escolhidas no topo; a empresa precisa ter CNPJ cadastrado.</li>
         </ol>
@@ -1231,7 +1395,7 @@
       renderRevResults();
     },
     'clear-filters': () => { App.ui.rev = defaultUI().rev; savePrefs(); renderAll(); },
-    'page': el => { const t = el.dataset.t; App.ui[t].page = Math.max(1, +el.dataset.p); t === 'rev' ? renderRevResults() : renderNotasResults(); },
+    'page': el => { const t = el.dataset.t; App.ui[t].page = Math.max(1, +el.dataset.p); t === 'rev' ? renderRevResults() : t === 'itens' ? renderItensResults() : renderNotasResults(); },
     'clear-sel': () => { App.sel.clear(); renderRevResults(); },
     'bulk-status': el => {
       const s = el.dataset.v;
@@ -1249,6 +1413,25 @@
       catch (e) { toast('Não foi possível gerar a planilha: ' + h(e.message), 'err'); }
     },
     'export-sos': () => exportarSOS(),
+    'toggle-menu': () => {
+      const recolher = !$('.app').classList.contains('menu-recolhido');
+      aplicarMenu(recolher);
+      ST.prefSet('menu', recolher ? 'recolhido' : '');
+    },
+    'modo-notas': el => { App.ui.notas.modo = el.dataset.v; savePrefs(); renderAll(); },
+    'toggle-grupo': el => {
+      const k = el.dataset.k, f = App.ui.itens;
+      f.abertos = f.abertos.includes(k) ? f.abertos.filter(x => x !== k) : f.abertos.concat(k);
+      renderItensResults();
+    },
+    'export-itens': () => {
+      try {
+        const rows = itemRows();
+        const crit = App.ui.itens.agrupar;
+        const r = R.exportarItens(App.model, rows, crit ? { nome: AGRUPAR[crit].nome, grupos: agruparItens(rows, crit) } : null, App.ui.ref);
+        toast(h(`Planilha gerada: ${r.itens} item(ns)${crit ? ` em ${r.grupos} grupo(s) por ${inicialMin(AGRUPAR[crit].nome)}` : ''}.`), 'ok');
+      } catch (e) { toast('Não foi possível gerar a planilha: ' + h(e.message), 'err'); }
+    },
     'export-produtos': () => { try { const n = R.exportarProdutosST(App.model, App.ui.empresa); toast(`Lista com ${n} produto(s) com ICMS-ST gerada.`, 'ok'); } catch (e) { toast('Erro: ' + h(e.message), 'err'); } },
     'print': () => global.print(),
     'open-req': el => openRequerimento({ companyId: el.dataset.cid || App.ui.empresa || '', referencia: el.dataset.ref || App.ui.ref || '' }),
@@ -1315,7 +1498,9 @@
     App.ui[grp][k] = el.type === 'checkbox' ? el.checked : el.value;
     App.ui[grp].page = 1;
     savePrefs();
-    if (grp === 'rev') renderRevResults(); else renderNotasResults();
+    if (grp === 'rev') renderRevResults();
+    else if (grp === 'itens') { App.ui.itens.abertos = []; renderItensResults(); }
+    else renderNotasResults();
   }
   const setFilterDebounced = U.debounce(setFilter, 220);
 
@@ -1420,7 +1605,9 @@
     App.ui = Object.assign(defaultUI(), ST.prefGet('ui', {}));
     App.ui.rev = Object.assign(defaultUI().rev, App.ui.rev || {});
     App.ui.notas = Object.assign(defaultUI().notas, App.ui.notas || {});
+    App.ui.itens = Object.assign(defaultUI().itens, App.ui.itens || {});
     App.ui.docs = { kind: '' };
+    aplicarMenu(ST.prefGet('menu', '') === 'recolhido');
     App.state = await ST.load();
     recompute();
     bind();

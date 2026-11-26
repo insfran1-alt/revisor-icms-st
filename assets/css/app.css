@@ -88,6 +88,35 @@ svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none;
 .nav button.active { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
 .nav .count { margin-left: auto; font-size: 11px; font-weight: 600; background: var(--forte); color: #fff; border-radius: 999px; padding: 1px 7px; }
 .sidebar-foot { margin-top: auto; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 10px; padding: 0 6px; }
+
+/* Menu retrátil */
+.app { transition: grid-template-columns .2s ease; }
+.menu-toggle {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; margin-top: -8px; border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 12.5px; text-align: left;
+}
+.menu-toggle:hover { background: var(--surface-2); color: var(--text); }
+.menu-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.menu-toggle svg { transition: transform .2s ease; }
+@media (min-width: 861px) {
+  .app.menu-recolhido { grid-template-columns: 68px minmax(0, 1fr); }
+  .app.menu-recolhido .sidebar { padding: 18px 10px; align-items: center; overflow-x: hidden; }
+  .app.menu-recolhido .brand { padding: 2px 0; justify-content: center; }
+  .app.menu-recolhido .brand > div:last-child, .app.menu-recolhido .nav .lbl, .app.menu-recolhido .menu-toggle .lbl, .app.menu-recolhido .sidebar-foot { display: none; }
+  .app.menu-recolhido .nav { width: 100%; }
+  .app.menu-recolhido .nav button { justify-content: center; padding: 10px 0; position: relative; }
+  .app.menu-recolhido .nav .count { position: absolute; top: 1px; right: 4px; margin: 0; padding: 0 5px; font-size: 10px; }
+  .app.menu-recolhido .menu-toggle { justify-content: center; padding: 8px 0; }
+  .app.menu-recolhido .menu-toggle svg { transform: rotate(180deg); }
+}
+
+/* Lista de itens: grupos e itens do grupo */
+.icon-toggle { padding: 2px 4px; margin-right: 4px; vertical-align: middle; }
+.icon-toggle svg { transition: transform .15s ease; }
+.rot90 { transform: rotate(90deg); }
+table.data tr.grp td { background: var(--surface); }
+table.data tr.sub-row td { background: var(--surface-2); }
+table.data tr.sub-row td:first-child { padding-left: 40px; }
 .privacy { display: flex; gap: 8px; align-items: flex-start; background: var(--surface-2); border-radius: var(--radius-sm); padding: 9px 10px; }
 .privacy svg { width: 16px; height: 16px; margin-top: 1px; color: var(--ok); }
 
@@ -321,7 +350,7 @@ table.data .fund { min-width: 260px; max-width: 420px; color: var(--text-2); fon
 @media (max-width: 860px) {
   .app { grid-template-columns: 1fr; }
   .sidebar { position: sticky; top: 0; height: auto; z-index: 40; flex-direction: row; align-items: center; padding: 8px 10px; gap: 10px; border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
-  .brand p, .sidebar-foot { display: none; }
+  .brand p, .sidebar-foot, .menu-toggle { display: none; }
   .brand h1 { white-space: nowrap; }
   .nav { flex-direction: row; gap: 2px; }
   .nav button { white-space: nowrap; padding: 7px 9px; }

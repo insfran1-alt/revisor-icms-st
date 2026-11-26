@@ -23,6 +23,8 @@ Ferramenta web para **revisar as cobranças de ICMS-ST (tributo 333) e de ICMS E
    - opcional: o **XML da NF-e** (confirma ST retido pelo remetente, destinatário, CEST e linhas repetidas).
 3. **Revisão** — filtre por empresa, referência, tributo, força, tipo de achado, status, UF e valor. Clique num achado para ver os dados do item, a fundamentação, a base legal e os documentos a anexar; marque o status e o protocolo.
 4. **Pedido** — gere o Excel, o requerimento e a lista para o e-Fazenda.
+   - **Notas e itens → Itens**: todos os itens cobrados, com filtro *para revisão / com valor a revisar / sem apontamento* e agrupamento por descrição, NCM, CEST, NCM e CEST, GTIN, fornecedor, nota, tributo, referência, segmento ou item do Subanexo I, MVA aplicada, percentual da Equalização ou situação na revisão. O botão *Excel* gera a planilha do agrupamento e dos itens, para conferir em outros portais (ex.: Econet).
+   - O menu lateral pode ser recolhido (botão *Recolher menu*), ficando só os ícones.
 5. **SOS Reforma** — na tela Revisão, o botão *SOS Reforma* gera a relação dos produtos no modelo do SOS Reforma (`CNPJ | NCM | Descrição | GTIN | Código do Produto`, aba `Sheet1`), um produto por linha, para conferir NCM e classificação. Vale a empresa e a referência escolhidas no topo. Com o XML da NF-e importado, a relação leva a descrição completa, o GTIN e o código do produto da nota; sem XML, o código é gerado pelo app e é sempre o mesmo para o mesmo produto.
 
 ### Força dos achados

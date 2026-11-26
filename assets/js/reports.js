@@ -283,5 +283,47 @@
     return resumo;
   }
 
-  global.RST_REPORTS = { consolidar, exportarExcel, requerimentoHTML, baixarWord, imprimirHTML, listaEFazenda, exportarProdutosST, produtosSOSReforma, exportarSOSReforma, wrapDoc, CSS_DOC };
+  /* ---------------- Lista de itens (com ou sem agrupamento) para conferência em outros portais ---------------- */
+  function exportarItens(model, rows, agrupado, referencia) {
+    const X = global.XLSX, L = global.RST_LEGAL;
+    const linhas = rows.map(r => {
+      const it = r.it, c = model.companies.get(it.companyId);
+      const o = it.oficial && it.oficial.cands.length ? ((it.oficial.especificos && it.oficial.especificos.length) ? it.oficial.especificos : it.oficial.cands) : [];
+      const st = it.tipo === 'ST';
+      return {
+        'Empresa': nomeEmpresa(c), 'Referência': U.refLabel(it.referencia), 'Tributo': st ? 'ICMS-ST (333)' : 'Equalização (349)',
+        'NF': it.numero, 'Emissão': U.brDate((r.nf && r.nf.dataEmissao) || ''), 'CNPJ do remetente': U.fmtCNPJ(it.cnpjRemetente), 'UF': it.ufRemetente || '',
+        'Descrição': it.descricao, 'NCM': U.fmtNCM(it.ncm), 'CEST': U.fmtCEST(it.cest), 'GTIN': gtinValido(it.gtin || (it.xmlItem && it.xmlItem.gtin)),
+        'CST': it.cst || '', 'CFOP': it.cfop || '',
+        'Valor da mercadoria': it.valorTotal || 0, 'Frete': it.frete || 0, 'IPI': it.ipi || 0, 'Outros': it.outros || 0, 'Desconto': it.desconto || 0, 'Base / custo final': it.base || 0,
+        'MVA aplicada (%)': st && it.mvaAj !== null && it.mvaAj !== undefined ? it.mvaAj : '',
+        'MVA de referência (%)': st && it.mvaTab !== null && it.mvaTab !== undefined ? it.mvaTab : '',
+        'Fonte da MVA de referência': st && it.mvaRef ? (it.mvaRef.oficial ? 'Subanexo I' : 'Tabela do usuário') : '',
+        'Item do Subanexo I': o.slice(0, 3).map(e => `${e.item} (CEST ${U.fmtCEST(e.cest)})`).join('; '),
+        'Alíq. interestadual (%)': st ? (it.aliqInter || '') : '', 'Crédito admitido': st ? (it.credito || 0) : '', 'Percentual EQ (%)': st ? '' : (it.percentual || 0),
+        'ICMS cobrado': it.icms || 0, 'ICMS recalculado': it.icmsCalc !== null && it.icmsCalc !== undefined ? it.icmsCalc : '', 'A revisar': r.rev || 0,
+        'Situação na revisão': r.forca ? L.FORCAS[r.forca].nome : 'Sem apontamento', 'Achados': U.uniq(r.fs.map(x => L.REGRAS[x.ruleId].nome)).join('; ')
+      };
+    });
+    const wb = X.utils.book_new();
+    if (agrupado) {
+      const gl = agrupado.grupos.map(g => ({
+        [agrupado.nome]: g.rot, 'Itens': g.itens, 'NFs': g.nfs, 'NCM': g.ncms.join(', '), 'CEST': g.cests.join(', '), 'MVA aplicada': g.mvas.join(', '),
+        'Descrições': g.descs.slice(0, 5).join(' | ') + (g.descs.length > 5 ? ` (+${g.descs.length - 5})` : ''),
+        'Valor da mercadoria': g.valor, 'ICMS cobrado': g.icms, 'A revisar': g.rev, 'Itens com apontamento': g.comAchado
+      }));
+      const wg = X.utils.json_to_sheet(gl.length ? gl : [{ 'Aviso': 'Nenhum item no filtro.' }]);
+      wg['!cols'] = [48, 7, 6, 24, 14, 18, 70, 16, 14, 12, 12].map(w => ({ wch: w }));
+      setMoneyFormat(wg, [7, 8, 9]);
+      X.utils.book_append_sheet(wb, wg, ('Por ' + agrupado.nome).replace(/[:\\/?*[\]]/g, ' ').slice(0, 31));
+    }
+    const wi = X.utils.json_to_sheet(linhas.length ? linhas : [{ 'Aviso': 'Nenhum item no filtro.' }]);
+    wi['!cols'] = [26, 9, 16, 9, 10, 19, 5, 52, 11, 11, 15, 6, 6, 13, 9, 9, 9, 9, 13, 10, 10, 15, 24, 9, 11, 10, 12, 12, 12, 18, 50].map(w => ({ wch: w }));
+    setMoneyFormat(wi, [13, 14, 15, 16, 17, 18, 24, 26, 27, 28]);
+    X.utils.book_append_sheet(wb, wi, 'Itens');
+    X.writeFile(wb, `itens${agrupado ? '-por-' + U.slug(agrupado.nome) : ''}${referencia ? '-' + referencia : ''}-${U.today()}.xlsx`);
+    return { itens: linhas.length, grupos: agrupado ? agrupado.grupos.length : 0 };
+  }
+
+  global.RST_REPORTS = { consolidar, exportarExcel, requerimentoHTML, baixarWord, imprimirHTML, listaEFazenda, exportarProdutosST, produtosSOSReforma, exportarSOSReforma, exportarItens, wrapDoc, CSS_DOC };
 })(window);
