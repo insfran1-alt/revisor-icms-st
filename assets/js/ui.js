@@ -58,6 +58,7 @@
       rev: { q: '', tipo: '', forca: ['forte', 'moderada', 'atencao'], regra: '', status: '', uf: '', min: '', page: 1, sort: 'forca' },
       notas: { q: '', tipo: '', achados: false, page: 1, modo: 'notas' },
       itens: { q: '', tipo: '', revisao: '', agrupar: '', ordem: 'az', page: 1, abertos: [] },
+      memoria: { tipo: 'ST', q: '', revisao: '', agrupar: '', filtros: {}, sort: null, vazias: false, page: 1, fechados: [] },
       docs: { kind: '' }
     };
   }
@@ -79,7 +80,7 @@
     setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 320); }, ms);
   }
 
-  const savePrefs = U.debounce(() => ST.prefSet('ui', { view: App.ui.view, empresa: App.ui.empresa, ref: App.ui.ref, rev: Object.assign({}, App.ui.rev, { page: 1 }), notas: Object.assign({}, App.ui.notas, { page: 1 }), itens: Object.assign({}, App.ui.itens, { page: 1, abertos: [] }) }), 300);
+  const savePrefs = U.debounce(() => ST.prefSet('ui', { view: App.ui.view, empresa: App.ui.empresa, ref: App.ui.ref, rev: Object.assign({}, App.ui.rev, { page: 1 }), notas: Object.assign({}, App.ui.notas, { page: 1 }), itens: Object.assign({}, App.ui.itens, { page: 1, abertos: [] }), memoria: Object.assign({}, App.ui.memoria, { page: 1, fechados: [] }) }), 300);
   const persist = U.debounce(() => ST.save(App.state).then(updateStorageInfo), 350);
 
   function recompute() {
@@ -128,8 +129,16 @@
     const fn = { painel: viewPainel, importar: viewImportar, revisao: viewRevisao, notas: viewNotas, empresas: viewEmpresas, tabelas: viewTabelas, ajuda: viewAjuda }[v.id];
     $('#view').innerHTML = fn();
     if (v.id === 'revisao') renderRevResults();
-    if (v.id === 'notas') { if (App.ui.notas.modo === 'itens') renderItensResults(); else renderNotasResults(); }
+    if (v.id === 'notas') renderNotasView();
     updateStorageInfo();
+  }
+
+  /** Resultado da tela "Notas e itens" conforme o modo (notas, itens ou memória de cálculo). */
+  function renderNotasView() {
+    const modo = App.ui.notas.modo;
+    if (modo === 'itens') renderItensResults();
+    else if (modo === 'memoria') renderMemoriaResults();
+    else renderNotasResults();
   }
 
   function renderNav() {
@@ -675,7 +684,7 @@
     commit({ render: false });
     renderNav();
     if (App.ui.view === 'revisao') renderRevResults();
-    if (App.ui.view === 'notas') { if (App.ui.notas.modo === 'itens') renderItensResults(); else renderNotasResults(); }
+    if (App.ui.view === 'notas') renderNotasView();
     toast(el.value ? `Destinação "${L.DESTINACOES[el.value]}" registrada para este produto.` : 'Destinação voltou para automático.', 'ok');
     const dr = $('#drawer');
     if (dr.classList.contains('open') && dr.dataset.nf) openNF(dr.dataset.nf);
@@ -705,9 +714,10 @@
   }
 
   function viewNotas() {
-    const modo = App.ui.notas.modo === 'itens' ? 'itens' : 'notas';
-    const seletor = `<div class="chips" role="group" aria-label="Ver por">${[['notas', 'Notas'], ['itens', 'Itens']].map(([k, n]) => `<button type="button" class="chip ${modo === k ? 'on' : ''}" aria-pressed="${modo === k}" data-act="modo-notas" data-v="${k}">${n}</button>`).join('')}</div>`;
+    const modo = ['itens', 'memoria'].includes(App.ui.notas.modo) ? App.ui.notas.modo : 'notas';
+    const seletor = `<div class="chips" role="group" aria-label="Ver por">${[['notas', 'Notas'], ['itens', 'Itens'], ['memoria', 'Memória de cálculo']].map(([k, n]) => `<button type="button" class="chip ${modo === k ? 'on' : ''}" aria-pressed="${modo === k}" data-act="modo-notas" data-v="${k}">${n}</button>`).join('')}</div>`;
     if (modo === 'itens') return viewItens(seletor);
+    if (modo === 'memoria') return viewMemoria(seletor);
     const f = App.ui.notas;
     return `<div class="card">
       <div class="toolbar">
@@ -754,8 +764,8 @@
   };
 
   /** Itens no escopo (empresa e referência do topo) com os achados ativos e o valor a revisar de cada um. */
-  function itemRows() {
-    const m = App.model, f = App.ui.itens, q = U.norm(f.q);
+  function itemRows(f = App.ui.itens) {
+    const m = App.model, q = U.norm(f.q);
     const ativos = m.findings.filter(x => inScope(x) && !['descartado', 'indeferido'].includes(x.status));
     const porItem = U.groupBy(ativos.filter(x => x.itemId), x => x.itemId);
     const porCobranca = U.groupBy(ativos.filter(x => !x.itemId), x => x.chargeId);
@@ -863,6 +873,250 @@
       ${pages > 1 ? `<div class="pager">Página ${f.page} de ${pages}<button class="btn sm" type="button" data-act="page" data-t="itens" data-p="${f.page - 1}" ${f.page <= 1 ? 'disabled' : ''}>Anterior</button><button class="btn sm" type="button" data-act="page" data-t="itens" data-p="${f.page + 1}" ${f.page >= pages ? 'disabled' : ''}>Próxima</button></div>` : ''}`;
   }
 
+  /* ---------- Memória de cálculo: grade completa, linha a linha, com colunas auxiliares do fornecedor ---------- */
+  const vazio = v => v === null || v === undefined || v === '' || (typeof v === 'number' && !v);
+  const fmtQtd = v => { if (v === null || v === undefined || v === '') return ''; const s = U.fmt(+v, 4); return s.replace(/,(\d*?)0+$/, (x, d) => d ? ',' + d : ''); };
+  const FMT = { txt: v => v === null || v === undefined ? '' : String(v), brl: v => vazio(v) && v !== 0 ? '' : U.fmt(+v || 0, 2), pct: v => v === null || v === undefined || v === '' ? '' : U.fmt(+v, 2), qtd: fmtQtd };
+  const NUMERICO = { brl: 1, pct: 1, qtd: 1 };
+
+  const COLS_AUX = [
+    { k: 'nf', t: 'NF', tipo: 'txt', v: r => r.it.numero, s: r => +r.it.numero || 0, fixa: true, aux: true },
+    { k: 'ref', t: 'Ref.', tipo: 'txt', v: r => U.refLabel(r.it.referencia), s: r => r.it.referencia || '', aux: true },
+    { k: 'cnpj', t: 'CNPJ do fornecedor', tipo: 'txt', v: r => U.fmtCNPJ(r.it.cnpjRemetente), aux: true },
+    { k: 'razao', t: 'Razão social do fornecedor', tipo: 'txt', v: r => (r.nf && r.nf.remetenteNome) || '', larga: true, aux: true },
+    { k: 'uf', t: 'UF', tipo: 'txt', v: r => r.it.ufRemetente || '', aux: true },
+    { k: 'emissao', t: 'Emissão', tipo: 'txt', v: r => U.brDate((r.nf && r.nf.dataEmissao) || ''), s: r => (r.nf && r.nf.dataEmissao) || '', aux: true }
+  ];
+  const nz = v => v || null; // zero que a memória mostra em branco
+  const COLS_ST = [
+    { k: 'descricao', t: 'Descrição', tipo: 'txt', v: r => r.it.descricao, larga: true, sempre: true },
+    { k: 'ncm', t: 'NCM/SH', tipo: 'txt', v: r => U.fmtNCM(r.it.ncm), sempre: true },
+    { k: 'cest', t: 'CEST', tipo: 'txt', v: r => U.fmtCEST(r.it.cest), sempre: true },
+    { k: 'gtin', t: 'Cód. EAN trib. (GTIN)', tipo: 'txt', v: r => r.it.gtin || '' },
+    { k: 'cst', t: 'CST', tipo: 'txt', v: r => r.it.cst || '' },
+    { k: 'cfop', t: 'CFOP', tipo: 'txt', v: r => r.it.cfop || '' },
+    { k: 'qtd', t: 'Quantidade', tipo: 'qtd', v: r => r.it.qtd },
+    { k: 'un', t: 'Un. trib.', tipo: 'txt', v: r => r.it.un || '' },
+    { k: 'qtdTrib', t: 'Quant. trib.', tipo: 'qtd', v: r => r.it.qtdTrib },
+    { k: 'valorTotal', t: 'Valor total', tipo: 'brl', v: r => r.it.valorTotal, sempre: true, soma: true },
+    { k: 'bcProprio', t: 'Base cálculo ICMS', tipo: 'brl', v: r => r.it.bcProprioInf !== undefined ? r.it.bcProprioInf : r.it.bcProprio, soma: true },
+    { k: 'aliqProprio', t: 'Alíq.', tipo: 'pct', v: r => nz(r.it.aliqProprio) },
+    { k: 'ipi', t: 'IPI', tipo: 'brl', v: r => r.it.ipi, soma: true },
+    { k: 'desconto', t: 'Desc.', tipo: 'brl', v: r => r.it.desconto, soma: true },
+    { k: 'frete', t: 'Rateio/frete FOB CT-e', tipo: 'brl', v: r => r.it.frete, soma: true },
+    { k: 'outros', t: 'Rateio/outros valores', tipo: 'brl', v: r => r.it.outros, soma: true },
+    { k: 'custoFinal', t: 'Custo final (R$)', tipo: 'brl', v: r => r.it.custoFinal, sempre: true, soma: true },
+    { k: 'mva', t: 'MVA', tipo: 'pct', v: r => nz(r.it.mva) },
+    { k: 'pmpf', t: 'PMPF', tipo: 'brl', v: r => nz(r.it.pmpf) },
+    { k: 'redBC', t: 'Redução BC (%)', tipo: 'pct', v: r => nz(r.it.redBC) },
+    { k: 'bcST', t: 'BC ICMS', tipo: 'brl', v: r => r.it.bcST, sempre: true, soma: true },
+    { k: 'bcPmpf', t: 'BC PMPF', tipo: 'brl', v: r => nz(r.it.bcPmpf), soma: true },
+    { k: 'aliqST', t: 'Alíq. (%)', tipo: 'pct', v: r => nz(r.it.aliqST) },
+    { k: 'aliqCred', t: 'Alíq. créd. admitido', tipo: 'pct', v: r => nz(r.it.aliqCred) },
+    { k: 'redBCProp', t: 'Redução BC op. própria (%)', tipo: 'pct', v: r => nz(r.it.redBCProp) },
+    { k: 'credito', t: 'Créd. admitido', tipo: 'brl', v: r => r.it.credito, sempre: true, soma: true },
+    { k: 'icms', t: 'ICMS a recolher', tipo: 'brl', v: r => r.it.icms, sempre: true, soma: true, forte: true },
+    { k: 'cstIbs', t: 'CST IBS', tipo: 'txt', v: r => r.it.cstIbs || '' },
+    { k: 'cClassTrib', t: 'Classificação trib. IBS', tipo: 'txt', v: r => r.it.cClassTrib || '' },
+    { k: 'indDoacao', t: 'Ind. doação IBS', tipo: 'txt', v: r => r.it.indDoacao || '' },
+    { k: 'bcIbs', t: 'Base cálculo IBS', tipo: 'txt', v: r => r.it.bcIbs || '' },
+    { k: 'aliqIbsUf', t: 'Alíquota IBS UF', tipo: 'txt', v: r => r.it.aliqIbsUf || '' },
+    { k: 'valorIbsUf', t: 'Valor IBS UF', tipo: 'txt', v: r => r.it.valorIbsUf || '' },
+    { k: 'aliqIbsMun', t: 'Alíquota IBS mun.', tipo: 'txt', v: r => r.it.aliqIbsMun || '' },
+    { k: 'valorIbsMun', t: 'Valor IBS mun.', tipo: 'txt', v: r => r.it.valorIbsMun || '' },
+    { k: 'ibs', t: 'IBS', tipo: 'txt', v: r => r.it.ibs || '' }
+  ];
+  const COLS_EQ = [
+    { k: 'pos', t: 'Item', tipo: 'qtd', v: r => r.it.pos || r.it.seq, sempre: true },
+    { k: 'ncm', t: 'NCM', tipo: 'txt', v: r => U.fmtNCM(r.it.ncm) + (r.it.ncmTruncado ? ' (cortado)' : ''), sempre: true },
+    { k: 'descricao', t: 'Descrição', tipo: 'txt', v: r => r.it.descricao, larga: true, sempre: true },
+    { k: 'valorTotal', t: 'Valor total', tipo: 'brl', v: r => r.it.valorTotal, sempre: true, soma: true },
+    { k: 'frete', t: 'Valor frete', tipo: 'brl', v: r => r.it.frete, soma: true },
+    { k: 'seguro', t: 'Valor seguro', tipo: 'brl', v: r => r.it.seguro, soma: true },
+    { k: 'ipi', t: 'Valor IPI', tipo: 'brl', v: r => r.it.ipi, soma: true },
+    { k: 'outros', t: 'Valor outros', tipo: 'brl', v: r => r.it.outros, soma: true },
+    { k: 'desconto', t: 'Valor desc.', tipo: 'brl', v: r => r.it.desconto, soma: true },
+    { k: 'percentual', t: 'Percentual %', tipo: 'pct', v: r => r.it.percentual, sempre: true },
+    { k: 'icms', t: 'Valor ICMS', tipo: 'brl', v: r => r.it.icms, sempre: true, soma: true, forte: true }
+  ];
+  const achadosTxt = r => U.uniq(r.fs.map(x => L.REGRAS[x.ruleId].nome)).join('; ');
+  const COLS_CONF = {
+    ST: [
+      { k: 'mvaAj', t: 'MVA aplicada (calculada)', tipo: 'pct', v: r => r.it.mvaAj, conf: true },
+      { k: 'mvaTab', t: 'MVA de referência', tipo: 'pct', v: r => r.it.mvaTab, conf: true },
+      { k: 'itemSub', t: 'Item do Subanexo I', tipo: 'txt', v: r => { const e = subPrincipal(r.it); return e ? `${e.item} (CEST ${U.fmtCEST(e.cest)})` : ''; }, conf: true },
+      { k: 'icmsCalc', t: 'ICMS recalculado', tipo: 'brl', v: r => r.it.icmsCalc, conf: true, soma: true },
+      { k: 'rev', t: 'A revisar', tipo: 'brl', v: r => r.rev, conf: true, soma: true, forte: true },
+      { k: 'achados', t: 'Achados', tipo: 'txt', v: achadosTxt, conf: true, larga: true }
+    ],
+    EQ: [
+      { k: 'base', t: 'Base calculada', tipo: 'brl', v: r => r.it.base, conf: true, soma: true },
+      { k: 'icmsCalc', t: 'ICMS recalculado', tipo: 'brl', v: r => r.it.icmsCalc, conf: true, soma: true },
+      { k: 'rev', t: 'A revisar', tipo: 'brl', v: r => r.rev, conf: true, soma: true, forte: true },
+      { k: 'achados', t: 'Achados', tipo: 'txt', v: achadosTxt, conf: true, larga: true }
+    ]
+  };
+  const colunasMemoria = tipo => COLS_AUX.concat(tipo === 'EQ' ? COLS_EQ : COLS_ST, COLS_CONF[tipo === 'EQ' ? 'EQ' : 'ST']);
+  const textoCel = (c, r) => FMT[c.tipo](c.v(r));
+
+  /** Filtro de coluna: texto (contém) ou, nas colunas de valor, comparação (">100", "<=50", "=10"). */
+  function passaFiltro(c, r, filtro) {
+    const fv = String(filtro).trim();
+    if (!fv) return true;
+    const mm = NUMERICO[c.tipo] && fv.match(/^(>=|<=|>|<|=)\s*(-?[\d.,]+)$/);
+    if (mm) {
+      const x = +c.v(r) || 0, y = U.num(mm[2]);
+      return mm[1] === '>' ? x > y : mm[1] === '<' ? x < y : mm[1] === '>=' ? x >= y : mm[1] === '<=' ? x <= y : Math.abs(x - y) < 0.005;
+    }
+    return U.norm(textoCel(c, r)).includes(U.norm(fv));
+  }
+  function comparar(c, a, b) {
+    if (c.s) { const x = c.s(a), y = c.s(b); return typeof x === 'number' ? x - y : String(x).localeCompare(String(y), 'pt-BR', { numeric: true }); }
+    if (NUMERICO[c.tipo]) return (+c.v(a) || 0) - (+c.v(b) || 0);
+    return textoCel(c, a).localeCompare(textoCel(c, b), 'pt-BR', { numeric: true });
+  }
+
+  /** Linhas da memória no escopo, com os filtros do topo, de coluna e a ordenação. Devolve também as colunas visíveis. */
+  function memoriaDados() {
+    const f = App.ui.memoria;
+    const tipo = f.tipo === 'EQ' ? 'EQ' : 'ST';
+    const base = itemRows({ tipo, revisao: f.revisao, q: f.q });
+    const todas = colunasMemoria(tipo);
+    const cols = f.vazias ? todas : todas.filter(c => c.aux || c.conf || c.sempre || base.some(r => !vazio(c.v(r))));
+    const filtros = Object.entries(f.filtros || {}).filter(([k, v]) => String(v || '').trim() && cols.some(c => c.k === k));
+    let rows = base.filter(r => filtros.every(([k, v]) => passaFiltro(cols.find(c => c.k === k), r, v)));
+    const cs = f.sort && cols.find(c => c.k === f.sort.k);
+    rows = cs ? rows.slice().sort((a, b) => comparar(cs, a, b) * (f.sort.dir || 1)) : rows.slice().sort((a, b) => String(a.it.referencia).localeCompare(String(b.it.referencia)) || (+a.it.numero || 0) - (+b.it.numero || 0) || (a.it.pos || a.it.seq || 0) - (b.it.pos || b.it.seq || 0));
+    return { tipo, cols, rows, ocultas: todas.length - cols.length, nFiltros: filtros.length };
+  }
+
+  function viewMemoria(seletor) {
+    const f = App.ui.memoria;
+    const semNome = listaFornecedores().filter(x => !x.razao).length;
+    return `<div class="card">
+      <div class="toolbar">
+        ${seletor}
+        <div class="chips" role="group" aria-label="Tributo">${[['ST', 'ICMS-ST (333)'], ['EQ', 'Equalização (349)']].map(([k, n]) => `<button type="button" class="chip ${(f.tipo === 'EQ' ? 'EQ' : 'ST') === k ? 'on' : ''}" aria-pressed="${(f.tipo === 'EQ' ? 'EQ' : 'ST') === k}" data-act="mem-tipo" data-v="${k}">${n}</button>`).join('')}</div>
+        <div class="search">${ic('search')}<input type="search" data-f="memoria.q" value="${h(f.q)}" placeholder="Buscar em todas as colunas: produto, NCM, NF, fornecedor…" aria-label="Buscar na memória"></div>
+        <select data-f="memoria.revisao" aria-label="Revisão">${opt('', 'Todos os itens', f.revisao)}${opt('com', 'Para revisão (com achado)', f.revisao)}${opt('valor', 'Com valor a revisar', f.revisao)}${opt('sem', 'Sem apontamento', f.revisao)}</select>
+        <select data-f="memoria.agrupar" aria-label="Agrupar">${opt('', 'Sem agrupar', f.agrupar)}${Object.entries(AGRUPAR).map(([k, a]) => opt(k, 'Agrupar por ' + inicialMin(a.nome), f.agrupar)).join('')}</select>
+        <label class="check small"><input type="checkbox" data-f="memoria.vazias" ${f.vazias ? 'checked' : ''}> Colunas vazias</label>
+        ${semNome ? `<button class="btn sm" type="button" data-act="buscar-fornecedores" title="Consulta a razão social pelo CNPJ (BrasilAPI)">${ic('search')} Razão social de ${semNome} fornecedor(es)</button>` : ''}
+      </div>
+      <div id="memoria-results"></div>
+    </div>`;
+  }
+
+  function linhaMemoria(r, cols) {
+    return `<tr class="click" data-nf="${h(r.it.nfKey)}" tabindex="0">${cols.map(c => {
+      const t = textoCel(c, r);
+      const cls = [NUMERICO[c.tipo] ? 'num' : '', c.fixa ? 'fixa' : '', c.larga ? 'larga' : '', c.forte ? 'strong' : '', c.conf ? 'conf' : ''].filter(Boolean).join(' ');
+      return `<td class="${cls}">${c.k === 'achados' && r.fs.length ? `${forcaPill(r.forca)} ` : ''}${h(t)}</td>`;
+    }).join('')}</tr>`;
+  }
+
+  function renderMemoriaResults() {
+    const box = $('#memoria-results');
+    if (!box) return;
+    // preserva o foco no filtro de coluna que está sendo digitado
+    const ativo = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.mf;
+    const caret = ativo ? document.activeElement.selectionStart : 0;
+    const scroll = box.querySelector('.mem-wrap') ? [box.querySelector('.mem-wrap').scrollLeft, box.querySelector('.mem-wrap').scrollTop] : null;
+    const f = App.ui.memoria;
+    if (f.agrupar && !AGRUPAR[f.agrupar]) f.agrupar = '';
+    const { tipo, cols, rows, ocultas, nFiltros } = memoriaDados();
+    const crit = f.agrupar;
+    const somas = {};
+    cols.filter(c => c.soma).forEach(c => { somas[c.k] = U.round2(U.sum(rows, r => +c.v(r) || 0)); });
+    const sortInd = c => f.sort && f.sort.k === c.k ? (f.sort.dir > 0 ? ' ▲' : ' ▼') : '';
+    const thead = `<thead><tr>${cols.map(c => `<th class="${[NUMERICO[c.tipo] ? 'num' : '', c.fixa ? 'fixa' : '', c.conf ? 'conf' : ''].filter(Boolean).join(' ')}"><button type="button" class="th-sort" data-act="mem-sort" data-k="${c.k}" title="Ordenar">${h(c.t)}${sortInd(c)}</button><input type="search" class="th-filtro" data-mf="${c.k}" value="${h((f.filtros || {})[c.k] || '')}" placeholder="${NUMERICO[c.tipo] ? '>0' : 'filtrar'}" aria-label="Filtrar ${h(c.t)}"></th>`).join('')}</tr></thead>`;
+    let corpo = '', pages = 1;
+    if (crit) {
+      const grupos = agruparItens(rows, crit);
+      // dentro do grupo, mantém a ordem da grade
+      const pos = new Map(rows.map((r, i) => [r, i]));
+      grupos.forEach(g => g.rows.sort((a, b) => pos.get(a) - pos.get(b)));
+      const GP = 40;
+      pages = Math.max(1, Math.ceil(grupos.length / GP));
+      if (f.page > pages) f.page = pages;
+      const fechados = new Set(f.fechados || []);
+      corpo = grupos.slice((f.page - 1) * GP, f.page * GP).map(g => {
+        const fechado = fechados.has(g.k);
+        const sub = cols.filter(c => c.soma && ['valorTotal', 'custoFinal', 'bcST', 'icms', 'rev'].includes(c.k)).map(c => `${c.t}: ${U.brl(U.sum(g.rows, r => +c.v(r) || 0))}`).join(' · ');
+        return `<tr class="grp"><td colspan="${cols.length}"><div class="grp-lbl"><button type="button" class="btn sm ghost icon-toggle" data-act="mem-grupo" data-k="${h(g.k)}" aria-expanded="${!fechado}">${ic('chevron', fechado ? '' : 'rot90')}</button><b>${h(g.rot)}</b><span class="sub">${g.itens} linha(s) · ${g.nfs} NF · ${h(sub)}</span></div></td></tr>${fechado ? '' : g.rows.map(r => linhaMemoria(r, cols)).join('')}`;
+      }).join('');
+    } else {
+      const PG = 300;
+      pages = Math.max(1, Math.ceil(rows.length / PG));
+      if (f.page > pages) f.page = pages;
+      corpo = rows.slice((f.page - 1) * PG, f.page * PG).map(r => linhaMemoria(r, cols)).join('');
+    }
+    const tfoot = rows.length ? `<tfoot><tr>${cols.map((c, i) => `<td class="${[NUMERICO[c.tipo] ? 'num' : '', c.fixa ? 'fixa' : ''].filter(Boolean).join(' ')}">${i === 0 ? 'Total' : c.soma ? U.fmt(somas[c.k], 2) : ''}</td>`).join('')}</tr></tfoot>` : '';
+    box.innerHTML = `<div class="sumline"><b>${rows.length} linha(s) da memória ${tipo === 'ST' ? 'do ICMS-ST' : 'da Equalização'}</b><span class="muted small">· ${U.uniq(rows.map(r => r.it.nfKey)).length} NF · ${tipo === 'ST' ? 'ICMS a recolher' : 'Valor ICMS'} ${U.brl(somas.icms || 0)} · a revisar ${U.brl(somas.rev || 0)}${ocultas ? ` · ${ocultas} coluna(s) vazia(s) oculta(s)` : ''}</span>
+        <div class="sp">${nFiltros ? `<button class="btn sm ghost" type="button" data-act="mem-limpar">${ic('x')} Limpar filtros de coluna</button>` : ''}${crit ? `<button class="btn sm ghost" type="button" data-act="mem-todos" data-v="abrir">Expandir grupos</button><button class="btn sm ghost" type="button" data-act="mem-todos" data-v="fechar">Recolher grupos</button>` : ''}<button class="btn sm" type="button" data-act="export-memoria" title="Planilha com as linhas e colunas desta grade, com filtro">${ic('download')} Excel</button></div></div>
+      <div class="mem-wrap"><table class="data mem">${thead}<tbody>${corpo || `<tr class="empty-row"><td colspan="${cols.length}">Nenhuma linha no filtro.</td></tr>`}</tbody>${tfoot}</table></div>
+      ${pages > 1 ? `<div class="pager">Página ${f.page} de ${pages}<button class="btn sm" type="button" data-act="page" data-t="memoria" data-p="${f.page - 1}" ${f.page <= 1 ? 'disabled' : ''}>Anterior</button><button class="btn sm" type="button" data-act="page" data-t="memoria" data-p="${f.page + 1}" ${f.page >= pages ? 'disabled' : ''}>Próxima</button></div>` : ''}`;
+    const wrap = box.querySelector('.mem-wrap');
+    if (scroll && wrap) { wrap.scrollLeft = scroll[0]; wrap.scrollTop = scroll[1]; }
+    if (ativo) { const inp = box.querySelector(`[data-mf="${ativo}"]`); if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch (e) { /* sem cursor */ } } }
+  }
+  const filtroColunaDebounced = U.debounce(el => { App.ui.memoria.filtros = Object.assign({}, App.ui.memoria.filtros, { [el.dataset.mf]: el.value }); App.ui.memoria.page = 1; savePrefs(); renderMemoriaResults(); }, 250);
+
+  /* ---------- Fornecedores (razão social por CNPJ) ---------- */
+  function listaFornecedores() {
+    const m = App.model, cad = App.state.fornecedores || {};
+    const porCnpj = U.groupBy(m.nfs.filter(nf => nf.cnpjRemetente && (!App.ui.empresa || nf.companyId === App.ui.empresa)), nf => nf.cnpjRemetente);
+    return Object.entries(porCnpj).map(([cnpj, nfs]) => {
+      const comXml = nfs.find(n => n.xml);
+      const c = cad[cnpj] || {};
+      const usuario = c.fonte === 'usuário' && c.razao;
+      return { cnpj, nfs: nfs.length, uf: U.uniq(nfs.map(n => n.ufRemetente).filter(Boolean)).join('/'),
+        razao: usuario ? c.razao : (comXml ? comXml.xml.data.emitente.nome : (c.razao || '')), fonte: usuario ? 'informada por você' : comXml ? 'XML da NF-e' : (c.fonte || '') };
+    }).sort((a, b) => (a.razao || '~').localeCompare(b.razao || '~', 'pt-BR') || a.cnpj.localeCompare(b.cnpj));
+  }
+
+  async function consultarCNPJ(cnpj) {
+    try {
+      const r = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
+      if (r.ok) { const j = await r.json(); if (j && j.razao_social) return { razao: j.razao_social, fantasia: j.nome_fantasia || '', uf: j.uf || '', municipio: j.municipio || '' }; }
+    } catch (e) { /* tenta a alternativa */ }
+    try {
+      const r = await fetch(`https://publica.cnpj.ws/cnpj/${cnpj}`);
+      if (r.ok) { const j = await r.json(); const e = j.estabelecimento || {}; if (j && j.razao_social) return { razao: j.razao_social, fantasia: e.nome_fantasia || '', uf: (e.estado && e.estado.sigla) || '', municipio: (e.cidade && e.cidade.nome) || '' }; }
+    } catch (e) { /* sem resposta */ }
+    return null;
+  }
+
+  async function buscarFornecedores() {
+    const cnpjs = listaFornecedores().filter(x => !x.razao && x.cnpj.length === 14).map(x => x.cnpj);
+    if (!cnpjs.length) return toast('Todos os fornecedores já têm razão social.', 'ok');
+    if (!global.confirm(`Consultar a razão social de ${cnpjs.length} fornecedor(es) pelo CNPJ na BrasilAPI (dados públicos da Receita Federal)?\n\nSó os CNPJs desses fornecedores são enviados; nenhum outro dado sai deste navegador.`)) return;
+    toast(`Consultando ${cnpjs.length} CNPJ(s)…`, '', 3000);
+    let ok = 0;
+    for (const cnpj of cnpjs) {
+      const d = await consultarCNPJ(cnpj);
+      if (d) { App.state.fornecedores[cnpj] = Object.assign(d, { fonte: 'consulta pelo CNPJ (BrasilAPI)', atualizadoEm: new Date().toISOString() }); ok++; }
+      await U.sleep(300);
+    }
+    commit();
+    const falha = cnpjs.length - ok;
+    toast(`Razão social encontrada para ${ok} fornecedor(es).${falha ? ` ${falha} sem resposta: informe em Tabelas e regras → Fornecedores.` : ''}`, falha ? '' : 'ok', 8000);
+  }
+
+  function cardFornecedores() {
+    const lista = listaFornecedores();
+    const semNome = lista.filter(x => !x.razao).length;
+    return `<div class="card">
+      <div class="card-head"><h3>Fornecedores</h3><span class="pill neutro">${lista.length}</span>
+        <div class="sp">${semNome ? `<button class="btn sm" type="button" data-act="buscar-fornecedores">${ic('search')} Buscar razão social (${semNome})</button>` : ''}</div></div>
+      <div class="card-pad muted small" style="padding-bottom:0">A razão social aparece na memória de cálculo, na lista de notas e nas planilhas. Vem do XML da NF-e; sem XML, digite abaixo ou use <b>Buscar razão social</b>, que consulta o CNPJ na BrasilAPI (dados públicos da Receita Federal) — só o CNPJ do fornecedor é enviado. O que você digitar prevalece.</div>
+      <div class="table-wrap"><table class="data"><thead><tr><th>CNPJ</th><th>UF</th><th class="num">NFs</th><th>Razão social</th><th>Fonte</th></tr></thead><tbody>
+        ${lista.length ? lista.map(x => `<tr><td class="small nowrap">${h(U.fmtCNPJ(x.cnpj))}</td><td class="small">${h(x.uf)}</td><td class="num">${x.nfs}</td>
+          <td><input type="text" data-forn="${h(x.cnpj)}" value="${h(x.razao)}" placeholder="Razão social" aria-label="Razão social de ${h(U.fmtCNPJ(x.cnpj))}" style="width:100%;min-width:260px"></td><td class="small muted">${h(x.fonte || '—')}</td></tr>`).join('')
+        : '<tr class="empty-row"><td colspan="5">Importe os relatórios de prévia para listar os fornecedores.</td></tr>'}
+      </tbody></table></div></div>`;
+  }
+
   function coverBar(r) {
     const v = r.nf.valorNF || 0;
     if (!v) return '<span class="sub">—</span>';
@@ -888,7 +1142,7 @@
         const cnt = U.groupBy(r.fs, x => x.forca);
         return `<tr class="click" data-nf="${h(r.nf.key)}" tabindex="0">
           <td class="nowrap"><b>${h(r.nf.numero)}</b><div class="sub">${r.chs.map(c => U.refLabel(c.referencia)).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</div></td>
-          <td class="small">${h(r.nf.remetenteNome || U.fmtCNPJ(r.nf.cnpjRemetente))}<div class="sub">${h(r.nf.ufRemetente || '')}</div></td>
+          <td class="small">${h(r.nf.remetenteNome || U.fmtCNPJ(r.nf.cnpjRemetente))}<div class="sub">${h([r.nf.remetenteNome ? U.fmtCNPJ(r.nf.cnpjRemetente) : '', r.nf.ufRemetente].filter(Boolean).join(' · '))}</div></td>
           <td class="small nowrap">${h(U.brDate(r.nf.dataEmissao))}</td>
           <td class="num">${U.brl(r.nf.valorNF)}</td>
           <td class="num">${r.st.length ? U.brl(r.stICMS) : '<span class="sub">—</span>'}</td>
@@ -957,7 +1211,7 @@
     if (!cur.situacao && !cur.obs) delete App.state.noteFlags[key]; else App.state.noteFlags[key] = cur;
     commit({ render: false });
     renderNav();
-    if (App.ui.view === 'notas') { if (App.ui.notas.modo === 'itens') renderItensResults(); else renderNotasResults(); }
+    if (App.ui.view === 'notas') renderNotasView();
     if (App.ui.view === 'revisao') renderRevResults();
     if (el.dataset.nfflag === 'situacao') toast(el.value ? 'Situação registrada: a NF entrou na lista de revisão.' : 'Situação normal restaurada.', 'ok');
   }
@@ -1137,6 +1391,8 @@
 
       ${cardSubanexo(S)}
 
+      ${cardFornecedores()}
+
       <div class="card">
         <div class="card-head"><h3>Sua tabela de MVA (ajustes)</h3><span class="pill neutro">${mv.length}</span>
           <div class="sp"><button class="btn sm" type="button" data-act="mva-add">${ic('plus')} Linha</button><button class="btn sm" type="button" data-act="mva-export" ${mv.length ? '' : 'disabled'}>${ic('download')} CSV</button><button class="btn sm ghost danger" type="button" data-act="mva-clear" ${mv.length ? '' : 'disabled'}>${ic('trash')} Limpar</button></div></div>
@@ -1237,6 +1493,7 @@
           <li><b>Memória de cálculo de cada NF</b>: para a Equalização, copie as páginas da tela "Dados da Nota" (cabeçalho da nota e tabela, 15 itens por página) e cole uma abaixo da outra no Excel — ou direto em <i>Importar → Colar a tabela</i>; o PDF da tela também serve, um arquivo por página. O app junta as páginas pela numeração "Visualizando 1 - 15 de N", ignora página repetida e avisa se faltar alguma. Para o ST, copie a tabela do portal e cole em <i>Importar → Colar a tabela</i> (ou salve em planilha com o nº da NF no nome, ex.: <i>NOTA 19192.xlsx</i>).</li>
           <li>Opcional: <b>XML das NF-e</b> — confirma ICMS-ST já retido pelo fornecedor, destinatário, CEST e linhas repetidas.</li>
           <li>Abra <b>Revisão</b>: filtre, confira cada achado, ajuste a destinação dos produtos e marque o status.</li>
+          <li>Em <b>Notas e itens → Memória de cálculo</b>: a memória inteira, linha a linha (ICMS-ST ou Equalização), com as colunas da SEFAZ e, à esquerda, NF, referência, CNPJ e razão social do fornecedor, UF e emissão. Cada coluna tem filtro (texto, ou "&gt;100", "&lt;50" nas de valor) e ordena ao clicar no título; dá para agrupar com subtotais, e o rodapé traz os totais. O botão <b>Excel</b> leva exatamente o que está na grade, com filtro. A razão social vem do XML; sem ele, informe em <i>Tabelas e regras → Fornecedores</i> ou use <b>Buscar razão social</b> (consulta pública pelo CNPJ).</li>
           <li>Em <b>Notas e itens → Itens</b>: veja todos os itens cobrados, filtre os que são para revisão ou os sem apontamento e agrupe por descrição, NCM, CEST, NCM e CEST, GTIN, fornecedor, nota, segmento ou item do Subanexo I, MVA e outros — cada grupo mostra itens, notas e valores e abre a lista de itens. O botão <b>Excel</b> leva a lista (e o agrupamento) para conferir em outros portais, como a Econet.</li>
           <li>Gere o <b>Excel</b> (com base legal e fundamentação), o <b>requerimento</b> (Word/PDF) e a <b>lista para o e-Fazenda</b>.</li>
           <li>Botão <b>SOS Reforma</b> (tela Revisão): gera a relação dos produtos no modelo do SOS Reforma — CNPJ, NCM, Descrição, GTIN e Código do Produto, um produto por linha — para conferir NCM e classificação. Vale a empresa e a referência escolhidas no topo; a empresa precisa ter CNPJ cadastrado.</li>
@@ -1395,7 +1652,7 @@
       renderRevResults();
     },
     'clear-filters': () => { App.ui.rev = defaultUI().rev; savePrefs(); renderAll(); },
-    'page': el => { const t = el.dataset.t; App.ui[t].page = Math.max(1, +el.dataset.p); t === 'rev' ? renderRevResults() : t === 'itens' ? renderItensResults() : renderNotasResults(); },
+    'page': el => { const t = el.dataset.t; App.ui[t].page = Math.max(1, +el.dataset.p); t === 'rev' ? renderRevResults() : t === 'itens' ? renderItensResults() : t === 'memoria' ? renderMemoriaResults() : renderNotasResults(); },
     'clear-sel': () => { App.sel.clear(); renderRevResults(); },
     'bulk-status': el => {
       const s = el.dataset.v;
@@ -1419,6 +1676,32 @@
       ST.prefSet('menu', recolher ? 'recolhido' : '');
     },
     'modo-notas': el => { App.ui.notas.modo = el.dataset.v; savePrefs(); renderAll(); },
+    'mem-tipo': el => { const f = App.ui.memoria; f.tipo = el.dataset.v; f.page = 1; f.fechados = []; savePrefs(); renderAll(); },
+    'mem-sort': el => {
+      const f = App.ui.memoria, k = el.dataset.k;
+      f.sort = !f.sort || f.sort.k !== k ? { k, dir: 1 } : f.sort.dir > 0 ? { k, dir: -1 } : null; // crescente → decrescente → sem ordem
+      f.page = 1; savePrefs(); renderMemoriaResults();
+    },
+    'mem-grupo': el => {
+      const f = App.ui.memoria, k = el.dataset.k;
+      f.fechados = (f.fechados || []).includes(k) ? f.fechados.filter(x => x !== k) : (f.fechados || []).concat(k);
+      renderMemoriaResults();
+    },
+    'mem-todos': el => {
+      const f = App.ui.memoria;
+      f.fechados = el.dataset.v === 'fechar' && f.agrupar ? agruparItens(memoriaDados().rows, f.agrupar).map(g => g.k) : [];
+      renderMemoriaResults();
+    },
+    'mem-limpar': () => { App.ui.memoria.filtros = {}; App.ui.memoria.page = 1; savePrefs(); renderMemoriaResults(); },
+    'export-memoria': () => {
+      try {
+        const { tipo, cols, rows } = memoriaDados();
+        const crit = App.ui.memoria.agrupar;
+        const r = R.exportarMemoria(cols, rows, crit ? { nome: AGRUPAR[crit].nome, grupos: agruparItens(rows, crit) } : null, tipo, App.ui.ref);
+        toast(h(`Planilha gerada: ${r.linhas} linha(s) da memória ${tipo === 'ST' ? 'do ICMS-ST' : 'da Equalização'}, ${cols.length} colunas, com filtro.`), 'ok');
+      } catch (e) { toast('Não foi possível gerar a planilha: ' + h(e.message), 'err'); }
+    },
+    'buscar-fornecedores': () => buscarFornecedores(),
     'toggle-grupo': el => {
       const k = el.dataset.k, f = App.ui.itens;
       f.abertos = f.abertos.includes(k) ? f.abertos.filter(x => x !== k) : f.abertos.concat(k);
@@ -1500,6 +1783,7 @@
     savePrefs();
     if (grp === 'rev') renderRevResults();
     else if (grp === 'itens') { App.ui.itens.abertos = []; renderItensResults(); }
+    else if (grp === 'memoria') { App.ui.memoria.fechados = []; renderMemoriaResults(); }
     else renderNotasResults();
   }
   const setFilterDebounced = U.debounce(setFilter, 220);
@@ -1549,6 +1833,13 @@
     if (t.matches('[data-comp]')) return setCompanyField(t);
     if (t.matches('[data-set]')) return setSetting(t);
     if (t.matches('[data-kw]')) return setKeywords(t);
+    if (t.matches('[data-forn]')) {
+      const cnpj = t.dataset.forn, v = t.value.trim();
+      App.state.fornecedores = App.state.fornecedores || {};
+      if (v) App.state.fornecedores[cnpj] = Object.assign({}, App.state.fornecedores[cnpj], { razao: v, fonte: 'usuário', atualizadoEm: new Date().toISOString() });
+      else delete App.state.fornecedores[cnpj];
+      return commit();
+    }
     if (t.matches('[data-cat]')) { const e2 = App.state.catalog[t.dataset.cat]; if (e2) { e2.destinacao = t.value; commit(); } return; }
     if (t.matches('[data-mva]')) {
       const e2 = App.state.mvaTable[+t.dataset.idx]; if (!e2) return;
@@ -1566,6 +1857,7 @@
     const t = e.target;
     if (t.matches('[data-f]') && (t.type === 'search' || t.type === 'text')) setFilterDebounced(t);
     if (t.id === 'sub-q') subBuscaDebounced(t.value);
+    if (t.matches('[data-mf]')) filtroColunaDebounced(t);
   }
 
   function bind() {
@@ -1606,6 +1898,8 @@
     App.ui.rev = Object.assign(defaultUI().rev, App.ui.rev || {});
     App.ui.notas = Object.assign(defaultUI().notas, App.ui.notas || {});
     App.ui.itens = Object.assign(defaultUI().itens, App.ui.itens || {});
+    App.ui.memoria = Object.assign(defaultUI().memoria, App.ui.memoria || {});
+    if (!App.ui.memoria.filtros || typeof App.ui.memoria.filtros !== 'object') App.ui.memoria.filtros = {};
     App.ui.docs = { kind: '' };
     aplicarMenu(ST.prefGet('menu', '') === 'recolhido');
     App.state = await ST.load();

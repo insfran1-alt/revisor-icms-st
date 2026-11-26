@@ -325,5 +325,34 @@
     return { itens: linhas.length, grupos: agrupado ? agrupado.grupos.length : 0 };
   }
 
-  global.RST_REPORTS = { consolidar, exportarExcel, requerimentoHTML, baixarWord, imprimirHTML, listaEFazenda, exportarProdutosST, produtosSOSReforma, exportarSOSReforma, exportarItens, wrapDoc, CSS_DOC };
+  /* ---------------- Memória de cálculo (grade) — as colunas e linhas que estão na tela, com autofiltro ---------------- */
+  function exportarMemoria(cols, linhas, agrupado, tipo, referencia) {
+    const X = global.XLSX;
+    const numerico = c => c.tipo === 'brl' || c.tipo === 'pct' || c.tipo === 'qtd';
+    const valor = (c, r) => {
+      const v = c.v(r);
+      if (numerico(c)) return v === null || v === undefined || v === '' ? '' : (+v || 0);
+      return v === null || v === undefined ? '' : String(v);
+    };
+    const off = agrupado ? 1 : 0;
+    const aoa = [(agrupado ? [agrupado.nome] : []).concat(cols.map(c => c.t))];
+    if (agrupado) agrupado.grupos.forEach(g => g.rows.forEach(r => aoa.push([g.rot].concat(cols.map(c => valor(c, r))))));
+    else linhas.forEach(r => aoa.push(cols.map(c => valor(c, r))));
+    const ws = X.utils.aoa_to_sheet(aoa);
+    const range = X.utils.decode_range(ws['!ref']);
+    for (let R = 1; R <= range.e.r; R++) {
+      cols.forEach((c, j) => {
+        const cell = ws[X.utils.encode_cell({ r: R, c: j + off })];
+        if (cell && typeof cell.v === 'number') cell.z = c.tipo === 'qtd' ? '#,##0.####' : '#,##0.00';
+      });
+    }
+    ws['!cols'] = (agrupado ? [{ wch: 40 }] : []).concat(cols.map(c => ({ wch: c.larga ? 48 : numerico(c) ? 13 : Math.max(9, Math.min(28, c.t.length + 2)) })));
+    ws['!autofilter'] = { ref: X.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: range.e.r, c: range.e.c } }) };
+    const wb = X.utils.book_new();
+    X.utils.book_append_sheet(wb, ws, tipo === 'EQ' ? 'Memória Equalização' : 'Memória ICMS-ST');
+    X.writeFile(wb, `memoria-${tipo === 'EQ' ? 'equalizacao' : 'icms-st'}${agrupado ? '-por-' + U.slug(agrupado.nome) : ''}${referencia ? '-' + referencia : ''}-${U.today()}.xlsx`);
+    return { linhas: aoa.length - 1 };
+  }
+
+  global.RST_REPORTS = { consolidar, exportarExcel, requerimentoHTML, baixarWord, imprimirHTML, listaEFazenda, exportarProdutosST, produtosSOSReforma, exportarSOSReforma, exportarItens, exportarMemoria, wrapDoc, CSS_DOC };
 })(window);

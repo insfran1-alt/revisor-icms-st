@@ -346,6 +346,9 @@
         nf.remetenteNome = x.emitente.nome;
         nf.charges.forEach(c => { if (!c.chave) c.chave = x.chave; if (!c.ufRemetente) c.ufRemetente = x.emitente.uf; });
       }
+      // razão social: a digitada pelo usuário prevalece; depois a do XML; sem XML, a consultada pelo CNPJ
+      const fo = (state.fornecedores || {})[nf.cnpjRemetente];
+      if (fo && fo.razao && (fo.fonte === 'usuário' || !nf.remetenteNome)) nf.remetenteNome = fo.razao;
     });
 
     /* 5. Itens */

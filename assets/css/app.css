@@ -110,6 +110,25 @@ svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none;
   .app.menu-recolhido .menu-toggle svg { transform: rotate(180deg); }
 }
 
+/* Memória de cálculo (grade com cabeçalho e coluna NF fixos, filtro por coluna e total no rodapé) */
+.mem-wrap { max-height: calc(100vh - 250px); min-height: 240px; overflow: auto; border-top: 1px solid var(--border); }
+table.data.mem { width: max-content; min-width: 100%; font-size: 12.5px; }
+table.data.mem th { z-index: 2; vertical-align: top; padding: 6px 8px; }
+table.data.mem td { padding: 6px 8px; white-space: nowrap; }
+table.data.mem td.larga { white-space: normal; min-width: 240px; max-width: 380px; }
+table.data.mem .fixa { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: inset -1px 0 0 var(--border); }
+table.data.mem th.fixa { z-index: 3; background: var(--surface-2); }
+table.data.mem th.conf { background: var(--accent-soft); }
+table.data.mem tbody tr.click:hover td { background: var(--surface-2); }
+.th-sort { all: unset; cursor: pointer; display: block; white-space: nowrap; }
+.th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+table.data.mem th.num .th-sort { text-align: right; }
+table.data.mem th input.th-filtro { display: block; width: 100%; min-width: 64px; min-height: 0; margin-top: 5px; padding: 3px 6px; font-size: 11.5px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+table.data.mem tr.grp td { background: var(--surface-2); padding: 6px 8px; }
+.grp-lbl { position: sticky; left: 8px; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+table.data.mem tfoot td { position: sticky; bottom: 0; z-index: 1; white-space: nowrap; }
+table.data.mem tfoot td.fixa { z-index: 3; background: var(--surface-2); }
+
 /* Lista de itens: grupos e itens do grupo */
 .icon-toggle { padding: 2px 4px; margin-right: 4px; vertical-align: middle; }
 .icon-toggle svg { transition: transform .15s ease; }

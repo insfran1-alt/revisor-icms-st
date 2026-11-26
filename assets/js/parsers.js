@@ -385,6 +385,18 @@
     const item = { descricao: desc };
     NUM_FIELDS.forEach(k => { if (k in o) item[k] = U.num(o[k]); });
     ['ncm', 'cest', 'gtin', 'cst', 'cfop', 'un'].forEach(k => { if (k in o) item[k] = String(o[k] ?? '').trim(); });
+    // colunas do IBS na memória do ST (guardadas como estão, para mostrar a memória completa). Em algumas memórias
+    // há uma célula vazia antes do grupo do IBS e os valores ficam uma coluna à direita do cabeçalho: o CST do IBS
+    // ("000") aparece sob "Classificação trib." — nesse caso, lê cada campo na coluna seguinte
+    const idxDe = {};
+    Object.entries(map).forEach(([i, k]) => { idxDe[k] = +i; });
+    const deslocado = 'cstIbs' in idxDe && !String(o.cstIbs ?? '').trim() && /^\d{3}$/.test(String(o.cClassTrib ?? '').trim());
+    ['cstIbs', 'cClassTrib', 'indDoacao', 'bcIbs', 'aliqIbsUf', 'valorIbsUf', 'aliqIbsMun', 'valorIbsMun', 'ibs'].forEach(k => {
+      if (!(k in idxDe)) return;
+      const v = String((deslocado ? row[idxDe[k] + 1] : o[k]) ?? '').trim();
+      if (v && v !== '-') item[k] = v;
+    });
+    if ('bcProprio' in o) item.bcProprioInf = U.num(o.bcProprio); // base da operação própria como veio na memória (antes do ajuste abaixo)
     // código gravado como número pela planilha perde o zero à esquerda
     if (typeof o.ncm === 'number' && o.ncm > 0) item.ncm = String(o.ncm).padStart(8, '0');
     if (typeof o.cest === 'number' && o.cest > 0) item.cest = String(o.cest).padStart(7, '0');

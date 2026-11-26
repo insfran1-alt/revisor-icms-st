@@ -52,6 +52,7 @@
       catalog: {},
       mvaTable: [],
       noteFlags: {},
+      fornecedores: {},
       settings: {}
     };
   }
@@ -61,7 +62,7 @@
     if (!s || typeof s !== 'object') return base;
     const out = Object.assign(base, s);
     ['companies', 'docs', 'mvaTable'].forEach(k => { if (!Array.isArray(out[k])) out[k] = []; });
-    ['decisions', 'catalog', 'noteFlags', 'settings'].forEach(k => { if (!out[k] || typeof out[k] !== 'object' || Array.isArray(out[k])) out[k] = {}; });
+    ['decisions', 'catalog', 'noteFlags', 'fornecedores', 'settings'].forEach(k => { if (!out[k] || typeof out[k] !== 'object' || Array.isArray(out[k])) out[k] = {}; });
     return out;
   }
 

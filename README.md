@@ -11,7 +11,7 @@ Ferramenta web para **revisar as cobranças de ICMS-ST (tributo 333) e de ICMS E
 - gera o **relatório consolidado** (Excel) com as colunas **Base legal** e **Fundamentação**, o **requerimento** pronto (Word/PDF) e a **lista de NFs para o pedido no e-Fazenda**;
 - guarda o cadastro das empresas com as **atividades (CNAE) do cartão CNPJ**.
 
-> **Privacidade:** tudo roda no seu navegador. Os PDFs, planilhas e XMLs são lidos localmente e os dados ficam salvos só no navegador (IndexedDB). Nada é enviado a servidores — nem ao GitHub.
+> **Privacidade:** tudo roda no seu navegador. Os PDFs, planilhas e XMLs são lidos localmente e os dados ficam salvos só no navegador (IndexedDB). Nada é enviado a servidores — nem ao GitHub. A única exceção é opcional: se você clicar em *Buscar razão social*, o CNPJ dos fornecedores é consultado na BrasilAPI.
 
 ## Como usar
 
@@ -23,6 +23,8 @@ Ferramenta web para **revisar as cobranças de ICMS-ST (tributo 333) e de ICMS E
    - opcional: o **XML da NF-e** (confirma ST retido pelo remetente, destinatário, CEST e linhas repetidas).
 3. **Revisão** — filtre por empresa, referência, tributo, força, tipo de achado, status, UF e valor. Clique num achado para ver os dados do item, a fundamentação, a base legal e os documentos a anexar; marque o status e o protocolo.
 4. **Pedido** — gere o Excel, o requerimento e a lista para o e-Fazenda.
+   - **Notas e itens → Memória de cálculo**: a memória completa, linha a linha (ICMS-ST ou Equalização), com todas as colunas da SEFAZ (as vazias podem ser ocultadas) e colunas auxiliares com NF, referência, CNPJ e razão social do fornecedor, UF e emissão; colunas de conferência (MVA calculada e de referência, item do Subanexo I, ICMS recalculado, a revisar, achados). Filtro em cada coluna (texto ou `>100`, `<50`), ordenação pelo título, agrupamento com subtotais, totais no rodapé e *Excel* com o que está na grade, já com autofiltro.
+   - **Fornecedores** (*Tabelas e regras*): a razão social vem do XML da NF-e; sem XML, digite-a ou use *Buscar razão social*, que consulta o CNPJ do fornecedor na BrasilAPI (dados públicos da Receita Federal) — só o CNPJ é enviado, e só quando você pede.
    - **Notas e itens → Itens**: todos os itens cobrados, com filtro *para revisão / com valor a revisar / sem apontamento* e agrupamento por descrição, NCM, CEST, NCM e CEST, GTIN, fornecedor, nota, tributo, referência, segmento ou item do Subanexo I, MVA aplicada, percentual da Equalização ou situação na revisão. O botão *Excel* gera a planilha do agrupamento e dos itens, para conferir em outros portais (ex.: Econet).
    - O menu lateral pode ser recolhido (botão *Recolher menu*), ficando só os ícones.
 5. **SOS Reforma** — na tela Revisão, o botão *SOS Reforma* gera a relação dos produtos no modelo do SOS Reforma (`CNPJ | NCM | Descrição | GTIN | Código do Produto`, aba `Sheet1`), um produto por linha, para conferir NCM e classificação. Vale a empresa e a referência escolhidas no topo. Com o XML da NF-e importado, a relação leva a descrição completa, o GTIN e o código do produto da nota; sem XML, o código é gerado pelo app e é sempre o mesmo para o mesmo produto.
