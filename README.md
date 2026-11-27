@@ -15,7 +15,7 @@ Ferramenta web para **revisar as cobranças de ICMS-ST (tributo 333) e de ICMS E
 
 ## Como usar
 
-> Novidade: tela **Vendas × ST**, que cruza o Registro de Saídas e o Controle do Simples (Makro) com as cobranças de ST (veja a seção própria abaixo). Agora também lê o SPED Fiscal de entradas.
+> Novidade: tela **Vendas × ST**, que cruza o Registro de Saídas e o Controle do Simples (Makro) com as cobranças de ST (veja a seção própria abaixo). Agora também lê o SPED Fiscal de entradas e a Relação de Produtos por Nota da Domínio.
 
 1. **Empresas** — importe o **cartão CNPJ** (PDF da Receita). As atividades (CNAE), o porte e a data de abertura ficam salvos e orientam a análise.
 2. **Importar** — arraste de uma vez (várias empresas e meses):
@@ -103,6 +103,11 @@ Mede o ICMS pago a mais no DAS quando mercadorias com ICMS-ST já recolhido saem
 - **SPED Fiscal de entradas (opcional, recomendado):** o arquivo TXT da EFD ICMS/IPI. O app guarda só as notas de entrada (C100/C170), reconhece a empresa pelo CNPJ e cruza cada nota com as cobranças de ICMS-ST e Equalização importadas.
   - Mostra as notas interestaduais sem cobrança localizada e as cobranças da SEFAZ sem nota escriturada.
   - Os produtos são ligados pelo GTIN (ou pela descrição), porque o código do produto no SPED pode ser diferente do código no relatório de saídas.
+- **Domínio — Relação de Produtos por Nota (XLS):** substitui o Registro de Saídas e o SPED, porque traz as entradas e as saídas item a item. A empresa é reconhecida pelo CNPJ do cabeçalho; se ela ainda não estiver cadastrada, o vínculo é feito quando o cartão CNPJ for importado.
+  - Vendas: só CFOP de venda (51xx, 54xx, 61xx, 64xx). Como o relatório não traz o CSOSN, a venda com CFOP 5405/6404 conta como já emitida como ST.
+  - Entradas: o ICMS-ST vem do campo próprio ou, nas compras com CFOP 1403/2403, das despesas acessórias. Devoluções de cliente, fretes e remessas não servem de origem do produto.
+  - Produtos ligados pelo código da Domínio (o mesmo nas entradas e saídas) ou pela descrição; não há GTIN nem CEST.
+  - O app corrige sozinho a posição errada da aba que esse .xls traz e que impede a leitura.
 - **Classificação de cada produto vendido:**
   - *ST cobrado na entrada:* mesmo GTIN ou descrição numa memória de ICMS-ST da empresa.
   - *ST retido antes:* com o SPED, produto do Subanexo I comprado dentro do estado ou com ICMS-ST destacado na NF de entrada.
@@ -163,7 +168,7 @@ assets/css/app.css      visual (tema claro/escuro, responsivo)
 assets/js/util.js       utilitários (números, datas, CNPJ, NCM…)
 assets/js/pdftext.js    extração de texto dos PDFs (pdf.js)
 assets/js/parsers.js    leitura: prévia, "Dados da Nota", memória ST, cartão CNPJ, XML
-assets/js/vendas.js     Vendas × ST: Registro de Saídas e Controle do Simples (Makro), SPED de entradas, classificação e Excel
+assets/js/vendas.js     Vendas × ST: Registro de Saídas e Controle do Simples (Makro), SPED de entradas, Relação de Produtos por Nota (Domínio), classificação e Excel
 assets/js/daems.js      Recolhimentos: DIFAL e Equalização devidos nos itens revisados, nº do DAEMS e memória
 assets/js/legal.js      base legal e catálogo de checagens
 assets/js/subanexo.js   leitura e consulta da relação oficial (Subanexo I)

@@ -149,13 +149,113 @@
     };
   }
 
-  /** Reconhece as planilhas da Makro; devolve o documento ou null. */
+  /* ============================================================
+   * Domínio: "Relação de Produtos por Nota" (entradas e saídas, item a item)
+   * ============================================================ */
+  const COLS_DOMINIO = [
+    ['tipo', /^tipo$/], ['situacao', /^situacao da nota/], ['dataES', /^data (saida|entrada)/], ['emissao', /^data emissao/],
+    ['nf', /^n[oº]? nf/], ['especie', /^especie/], ['serie', /^serie/], ['valorNota', /^valor contabil$/], ['codPart', /^codigo$/],
+    ['part', /^nome (fornecedor|cliente)/], ['uf', /^uf$/], ['doc', /^inscricao/], ['codigo', /^codigo produto/], ['nome', /^nome do produto/],
+    ['cfop', /^cfop produto/], ['cfopNota', /^cfop nota/], ['ncm', /^ncm/], ['cst', /^cst csosn/], ['unid', /^unidade/], ['qtd', /^quantidade/],
+    ['valor', /^valor produto/], ['bcST', /^b c icms st/], ['icmsST', /^valor icms st/], ['despesas', /^despesas acessorias/],
+    ['desconto', /^valor desconto/], ['chave', /^chave/]
+  ];
+  const CFOP_ENT_ST = ['1401', '1403', '2401', '2403'];
+  const ehVendaCfop = cf => /^[56](1\d\d|40[1-5])$/.test(cf);
+
+  /** Lê a Relação de Produtos por Nota da Domínio e devolve dois documentos: saídas (vendas) e entradas. */
+  function lerDominioProdutosNota(rows, fileName) {
+    const topo = rows.slice(0, 6).map(r => r.map(c => String(c ?? '').trim()).filter(Boolean).join(' '));
+    if (!topo.some(t => /rela[cç][aã]o de produtos por nota/i.test(t))) return null;
+    let hi = -1, map = null;
+    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+      const cells = rows[i].map(nh);
+      if (cells.includes('codigo produto') && cells.includes('nome do produto') && cells.includes('tipo')) {
+        map = {};
+        cells.forEach((c, j) => { if (!c) return; const k = COLS_DOMINIO.find(([key, re]) => !(key in map) && re.test(c)); if (k) map[k[0]] = j; });
+        hi = i; break;
+      }
+    }
+    if (hi < 0 || !('nf' in map) || !('valor' in map)) return null;
+    const g = (r, k) => (k in map ? r[map[k]] : '');
+    const s = (r, k) => String(g(r, k) ?? '').trim();
+    const nomeEmp = topo[0] || '';
+    const cnpj = U.digits((topo.find(t => /CNPJ/i.test(t)) || '').replace(/^[^\d]*/, ''));
+    const per = (topo.find(t => /per[ií]odo/i.test(t)) || '').match(/(\d{2}\/\d{2}\/\d{4})\D+(\d{2}\/\d{2}\/\d{4})/);
+    const ini = per ? isoDe(per[1]) : '', fim = per ? isoDe(per[2]) : '';
+    const modDe = e => ({ 36: '55', 41: '65', 1: '01' }[+e] || String(e || ''));
+
+    const sProd = {}, linhas = [], eProd = {}, parts = {}, notasMap = new Map();
+    let canc = 0, foraVenda = 0, foraVendaValor = 0, devol = 0;
+    for (let i = hi + 1; i < rows.length; i++) {
+      const r = rows[i];
+      const tipo = nh(g(r, 'tipo'));
+      if (tipo !== 'saida' && tipo !== 'entrada') continue;
+      if (!/regular/i.test(s(r, 'situacao'))) { canc++; continue; }
+      const nf = U.digits(g(r, 'nf'));
+      const nome = s(r, 'nome');
+      if (!nf || !nome) continue;
+      const cod = s(r, 'codigo') || U.normKey(nome).slice(0, 30);
+      const cfop = U.digits(g(r, 'cfop')) || U.digits(g(r, 'cfopNota'));
+      const qtd = U.round2(num(g(r, 'qtd')) * 1000) / 1000, valor = U.round2(num(g(r, 'valor'))), desc = U.round2(num(g(r, 'desconto')));
+      if (tipo === 'saida') {
+        if (!ehVendaCfop(cfop)) { foraVenda++; foraVendaValor += valor - desc; continue; }
+        if (!sProd[cod]) sProd[cod] = { nome, ean: '', tipo: '', ncm: U.digits(g(r, 'ncm')), cest: '' };
+        // [código, NF, modelo, data, qtd, CFOP, CST/CSOSN, valor, desconto]
+        linhas.push([cod, String(+nf), modDe(g(r, 'especie')), isoDe(g(r, 'emissao')) || isoDe(g(r, 'dataES')), qtd, cfop, U.digits(g(r, 'cst')), valor, desc]);
+      } else {
+        const codPart = s(r, 'codPart') || U.digits(g(r, 'doc')) || s(r, 'part');
+        if (!parts[codPart]) parts[codPart] = { nome: s(r, 'part'), cnpj: U.digits(g(r, 'doc')), ie: '', uf: s(r, 'uf').toUpperCase() };
+        if (!eProd[cod]) eProd[cod] = { nome, gtin: '', ncm: U.digits(g(r, 'ncm')), cest: '' };
+        const chave = U.digits(g(r, 'chave'));
+        const k = chave.length === 44 ? chave : `${codPart}|${+nf}`;
+        let n = notasMap.get(k);
+        if (!n) {
+          n = { nf: String(+nf), serie: s(r, 'serie'), mod: modDe(g(r, 'especie')), part: codPart, chave: chave.length === 44 ? chave : '', emissao: isoDe(g(r, 'emissao')), entrada: isoDe(g(r, 'dataES')), valor: 0, cfops: [], itens: [], _seg: new Set() };
+          notasMap.set(k, n);
+        }
+        // cada CFOP da nota vem como um "segmento" com o seu valor contábil
+        const cfN = U.digits(g(r, 'cfopNota'));
+        const seg = `${cfN}|${num(g(r, 'valorNota'))}`;
+        if (!n._seg.has(seg)) { n._seg.add(seg); n.valor = U.round2(n.valor + num(g(r, 'valorNota'))); }
+        if (cfN && !n.cfops.includes(cfN)) n.cfops.push(cfN);
+        if (/^[12](20[12]|41[01])$/.test(cfop)) devol += valor - desc;
+        // ICMS-ST: campo próprio ou, nas compras com CFOP de ST, o valor lançado em despesas acessórias
+        const st = num(g(r, 'icmsST')) || (CFOP_ENT_ST.includes(cfop) ? num(g(r, 'despesas')) : 0);
+        n.itens.push([n.itens.length + 1, cod, '', qtd, valor, desc, U.digits(g(r, 'cst')), cfop, U.round2(st)]);
+      }
+    }
+    const notas = [...notasMap.values()].map(n => { delete n._seg; return n; });
+    if (!linhas.length && !notas.length) return null;
+    const ref = (ini || '').slice(0, 7) || refMaisFrequente(linhas.map(l => l[3]).concat(notas.map(n => n.entrada || n.emissao)));
+    const base = { formato: 'dominio-produtos-nota', empresaNome: nomeEmp, cnpj, referencia: ref, periodo: { ini, fim } };
+    const out = [];
+    if (linhas.length) {
+      const w = [];
+      if (foraVenda) w.push(`${foraVenda} item(ns) de saída com CFOP que não é de venda (ex.: 5949, devolução de compra) ficaram fora: ${U.brl(U.round2(foraVendaValor))}.`);
+      if (canc) w.push(`${canc} linha(s) de notas canceladas ou numeração inutilizada ignoradas.`);
+      if (devol > 0) w.push(`Há devoluções de venda nas entradas (${U.brl(U.round2(devol))}); sem o Controle do Simples, a receita do mês não as desconta.`);
+      out.push({ kind: 'saidas', data: Object.assign({}, base, { produtos: sProd, linhas, total: U.round2(U.sum(linhas, l => l[7] - l[8])), nProdutos: Object.keys(sProd).length }), warnings: w });
+    }
+    if (notas.length) {
+      out.push({
+        kind: 'entradas',
+        data: Object.assign({}, base, { uf: 'MS', participantes: parts, produtos: eProd, notas, nNotas: notas.length, nItens: U.sum(notas, n => n.itens.length), total: U.round2(U.sum(notas, n => n.valor)) }),
+        warnings: []
+      });
+    }
+    return out;
+  }
+
+  /** Reconhece as planilhas da Makro e da Domínio; devolve o documento (ou a lista de documentos) ou null. */
   function lerPlanilhaMakro(wb, fileName) {
     const X = global.XLSX;
     const simples = lerControleSimples(wb, fileName);
     if (simples) return simples;
     for (const sn of wb.SheetNames) {
       const rows = X.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: '' });
+      const dom = lerDominioProdutosNota(rows, fileName);
+      if (dom) { dom.forEach(d => { d.data.planilha = sn; }); return dom; }
       const topo = rows.slice(0, 12).map(r => r.map(nh).join(' ')).join(' ');
       if (!/registro de saidas/.test(topo) && !rows.slice(0, 40).some(r => r.map(nh).includes('nome produto'))) continue;
       const d = lerRegSaidas(rows, fileName);
@@ -215,7 +315,8 @@
   }
 
   /** CFOP de entrada para mercadoria com ICMS-ST já retido/cobrado. */
-  const cfopEntST = cf => ({ 1102: '1403', 2102: '2403', 1101: '1401', 2101: '2401', 1403: '1403', 2403: '2403', 1401: '1401', 2401: '2401' }[cf] || '');
+  const ehCompraCfop = cf => /^[12](10[12]|11[0-8]|12[0-2]|40[13]|65[2-9])$/.test(cf) || ['2401', '1401'].includes(cf);
+  const cfopEntST = cf => ({ 1102: '1403', 2102: '2403', 1101: '1401', 2101: '2401', 1403: '1403', 2403: '2403', 1401: '1401', 2401: '2401', 1202: '1411', 2202: '2411', 1411: '1411', 2411: '2411' }[cf] || '');
 
   /** Notas de entrada (SPEDs importados até a referência) cruzadas com as cobranças da SEFAZ. */
   function entradasDaEmpresa(state, model, company, ref) {
@@ -229,7 +330,7 @@
     const charges = model.charges.filter(c => c.companyId === cid);
     const cobDa = (nf, cnpj) => charges.filter(c => String(+c.numero) === String(+nf) && (!(U.digits(c.cnpjRemetente).length === 14 && cnpj.length === 14) || U.digits(c.cnpjRemetente) === cnpj));
     const ufEmp = company.uf || '';
-    const notas = [], porGtin = new Map(), porNome = new Map();
+    const notas = [], porGtin = new Map(), porNome = new Map(), porCod = new Map();
     const add = (map, k, e) => { if (!k) return; const l = map.get(k); if (l) l.push(e); else map.set(k, [e]); };
     docs.forEach(d => {
       const r = d.link.referencia || d.data.referencia;
@@ -237,12 +338,18 @@
         const pt = d.data.participantes[n.part] || {};
         const cob = cobDa(n.nf, pt.cnpj || '');
         const N = Object.assign({}, n, { ref: r, fornecedor: pt.nome || '', cnpj: pt.cnpj || '', uf: pt.uf || '', interna: !!pt.uf && pt.uf === (d.data.uf || ufEmp), cobST: cob.some(c => c.tipo === 'ST'), cobEQ: cob.some(c => c.tipo === 'EQ') });
+        const cfs = n.cfops.length ? n.cfops : U.uniq(n.itens.map(i => i[7]).filter(Boolean));
+        N.natureza = !cfs.length || cfs.some(ehCompraCfop) ? 'compra' : cfs.every(c => /^[12](20[12]|41[01])$/.test(c)) ? 'devolucao' : 'outra';
         notas.push(N);
         n.itens.forEach(it => {
+          // só compras para revenda servem de origem do produto (devolução de cliente, frete, remessa etc. ficam de fora)
+          if (it[7] && !ehCompraCfop(it[7])) return;
           const pr = d.data.produtos[it[1]] || { nome: it[2], gtin: '', ncm: '', cest: '' };
           const e = { nota: N, item: it, prod: pr };
           if (temGtin(pr.gtin)) add(porGtin, pr.gtin.replace(/^0+/, ''), e);
           add(porNome, U.normKey(pr.nome || it[2]), e);
+          // na Domínio, entradas e saídas usam o mesmo cadastro de produtos
+          if (d.data.formato === 'dominio-produtos-nota') add(porCod, it[1], e);
         });
       });
     });
@@ -252,7 +359,7 @@
     const vistos = new Set();
     const semNota = charges.filter(c => refs.includes(c.referencia) && !nfs.has(String(+c.numero)) && !vistos.has(c.tipo + c.numero) && vistos.add(c.tipo + c.numero))
       .sort((a, b) => a.tipo.localeCompare(b.tipo) || (+a.numero - +b.numero));
-    return { docs, refs, notas, porGtin, porNome, semNota };
+    return { docs, refs, notas, porGtin, porNome, porCod, semNota };
   }
 
   /* ============================================================
@@ -327,6 +434,8 @@
     return pont[0].e;
   }
   const jaST = cst => { const d = U.digits(cst); return d.length >= 4 ? d.slice(-3) === '500' : d.length >= 2 && d.slice(-2) === '60'; };
+  /** Linha de venda já tratada como ST: pelo CSOSN/CST ou, quando o relatório não traz o CST (Domínio), pelo CFOP 5401/5403/5405/6401/6403/6404. */
+  const jaSTL = l => U.digits(l[6]) ? jaST(l[6]) : /^[56]40[1-5]$/.test(l[5]);
   const cfopST = cfop => ({ 5101: '5401', 5102: '5405', 5403: '5403', 5405: '5405', 6101: '6401', 6102: '6404', 6403: '6403', 6404: '6404' }[cfop] || cfop);
   const csosnST = cst => { const d = U.digits(cst); return d.length >= 4 ? d.charAt(0) + '500' : '500'; };
   const temGtin = e => { const d = U.digits(e); return d.length >= 8 && !/^0+$/.test(d); };
@@ -368,7 +477,7 @@
     sd.linhas.forEach(l => {
       const p = porCod[l[0]] || (porCod[l[0]] = { qtd: 0, bruto: 0, desc: 0, liq: 0, liqJa: 0, csts: new Set(), cfops: new Set(), nfs: new Set() });
       const liq = l[7] - l[8];
-      p.qtd += l[4]; p.bruto += l[7]; p.desc += l[8]; p.liq += liq; if (jaST(l[6])) p.liqJa += liq;
+      p.qtd += l[4]; p.bruto += l[7]; p.desc += l[8]; p.liq += liq; if (jaSTL(l)) p.liqJa += liq;
       p.csts.add(l[6]); p.cfops.add(l[5]); p.nfs.add(l[1]);
     });
 
@@ -405,15 +514,27 @@
         obs = pr.ncm ? 'NCM fora da relação do Subanexo I.' : 'Produto sem NCM no relatório.';
       }
       // entradas do SPED: resolve os "conferir" e mostra de onde veio o produto
-      const ents = E ? ((temGtin(gt) && E.porGtin.get(gt.replace(/^0+/, ''))) || E.porNome.get(U.normKey(pr.nome)) || []) : [];
+      const ents = E ? ((temGtin(gt) && E.porGtin.get(gt.replace(/^0+/, ''))) || (sd.formato === 'dominio-produtos-nota' && E.porCod.get(cod)) || E.porNome.get(U.normKey(pr.nome)) || []) : [];
+      // NCM fora do Subanexo (ou só em posição genérica), mas o fornecedor destacou ICMS-ST na NF de entrada
+      if (E && sit === 'nao' && !(ent && (ent.EQ.length || ent.contest.length))) {
+        const dest = ents.filter(e => e.item[8] > 0);
+        if (dest.length) {
+          sit = 'st_retido'; notas = U.uniq(dest.map(e => e.nota.nf));
+          obs = `ICMS-ST destacado pelo fornecedor na NF de entrada ${nfsTxt(dest)} (CFOP ${U.uniq(dest.map(e => e.item[7])).join('/')}). ${obs} Confira o enquadramento antes de alterar o cadastro.`;
+        }
+      }
       if (E && sit === 'st_conferir') {
         const retido = ents.filter(e => e.item[8] > 0);
+        const cfST = ents.filter(e => CFOP_ENT_ST.includes(e.item[7]));
         const internas = ents.filter(e => e.nota.interna);
         const cobST = ents.filter(e => e.nota.cobST);
         const cobEQ = ents.filter(e => e.nota.cobEQ);
         if (retido.length) {
           sit = 'st_retido'; notas = U.uniq(retido.map(e => e.nota.nf));
           obs = `ICMS-ST destacado pelo fornecedor na NF de entrada ${nfsTxt(retido)}.`;
+        } else if (cfST.length) {
+          sit = 'st_retido'; notas = U.uniq(cfST.map(e => e.nota.nf));
+          obs = `Entrada escriturada com CFOP ${U.uniq(cfST.map(e => e.item[7])).join('/')} (mercadoria com ICMS-ST) na NF ${nfsTxt(cfST)}.`;
         } else if (cobST.length) {
           obs = `A NF de entrada ${nfsTxt(cobST)} tem cobrança de ICMS-ST no app, mas a memória importada não traz este produto. Confira se o item foi cobrado e importe a memória completa.`;
         } else if (internas.length) {
@@ -422,7 +543,7 @@
         } else if (ents.length) {
           obs = `Entrou na NF ${nfsTxt(ents)}, mas essa nota não tem cobrança de ICMS-ST importada no app${cobEQ.length ? ' (só de Equalização)' : ''}. Confira no portal da SEFAZ se o ICMS-ST foi cobrado e importe a memória.`;
         } else {
-          obs += ' Não há entrada deste produto nos SPEDs importados.';
+          obs += ' Não há entrada deste produto nas notas de entrada importadas (SPED ou Domínio) — pode ter sido comprado em mês anterior.';
         }
       }
       const entrada = ents.length ? {
@@ -474,8 +595,10 @@
     // itens das notas de entrada com a situação do produto (para a aba do Excel e a tela)
     let entradas = null;
     if (E) {
-      const pG = new Map(), pN = new Map();
+      const pG = new Map(), pN = new Map(), pC = new Map();
+      const dom = sd.formato === 'dominio-produtos-nota';
       produtos.forEach(p => {
+        if (dom) pC.set(p.cod, p);
         const g = U.digits(p.ean).length >= 8 ? U.digits(p.ean) : (/^\d{8,14}$/.test(p.cod) ? p.cod : '');
         if (temGtin(g) && !pG.has(g.replace(/^0+/, ''))) pG.set(g.replace(/^0+/, ''), p);
         const k = U.normKey(p.nome); if (k && !pN.has(k)) pN.set(k, p);
@@ -485,7 +608,7 @@
         const d = E.docs.find(x => (x.link.referencia || x.data.referencia) === n.ref);
         const pr = (d && d.data.produtos[it[1]]) || { nome: it[2], gtin: '', ncm: '', cest: '' };
         const gk = temGtin(pr.gtin) ? pr.gtin.replace(/^0+/, '') : '';
-        const pv = (gk && pG.get(gk)) || pN.get(U.normKey(pr.nome || it[2])) || null;
+        const pv = (gk && pG.get(gk)) || (d && d.data.formato === 'dominio-produtos-nota' && pC.get(it[1])) || pN.get(U.normKey(pr.nome || it[2])) || null;
         let situacao, st, talvez = false;
         if (pv) { situacao = SIT[pv.sit].nome; st = SIT[pv.sit].st; talvez = pv.sit === 'st_conferir'; }
         else {
@@ -493,9 +616,11 @@
           if (k && k.ST.length) { situacao = 'Não vendido no mês - ICMS-ST cobrado na entrada'; st = true; }
           else if (k && k.contest.length) { situacao = 'Não vendido no mês - cobrança de ST contestada'; st = false; }
           else if (k && k.EQ.length) { situacao = 'Não vendido no mês - Equalização'; st = false; }
+          else if (it[8] > 0) { situacao = 'Não vendido no mês - ICMS-ST destacado na NF de entrada'; st = true; }
           else { situacao = 'Não vendido no mês'; st = false; }
         }
-        itens.push({ nota: n, item: it, prod: pr, situacao, st, cfopCorreto: st ? (cfopEntST(it[7]) || (n.interna ? '1403' : '2403')) + (talvez ? ' (se confirmado o ST)' : '') : '' });
+        const cfC = st ? (cfopEntST(it[7]) || (!it[7] || ehCompraCfop(it[7]) ? (n.interna ? '1403' : '2403') : '')) : '';
+        itens.push({ nota: n, item: it, prod: pr, situacao, st, cfopCorreto: cfC ? cfC + (talvez ? ' (se confirmado o ST)' : '') : '' });
       }));
       entradas = { refs: E.refs, notas: E.notas, semNota: E.semNota, itens, docs: E.docs };
     }
@@ -544,7 +669,7 @@
       const hE = ['NF', 'Série', 'Modelo', 'Emissão', 'Entrada', 'Fornecedor', 'CNPJ', 'UF', 'Chave de acesso', 'Item', 'Código no ERP', 'Produto', 'EAN/GTIN', 'NCM', 'Qtd', 'Valor (R$)', 'ICMS-ST destacado (R$)', 'CST/CSOSN escriturado', 'CFOP escriturado', 'CFOP correto', 'Situação do produto', 'Cobrança da SEFAZ na NF'];
       const aE = [hE.map(v => cell(v))];
       const dtc = iso => iso ? { t: 'd', v: new Date(iso + 'T12:00:00'), z: 'dd/mm/yyyy' } : cell('');
-      const cobTxt = n => n.cobST && n.cobEQ ? 'ICMS-ST e Equalização' : n.cobST ? 'ICMS-ST' : n.cobEQ ? 'Equalização' : n.interna ? 'Compra interna (sem cobrança)' : 'Não localizada no app';
+      const cobTxt = n => n.cobST && n.cobEQ ? 'ICMS-ST e Equalização' : n.cobST ? 'ICMS-ST' : n.cobEQ ? 'Equalização' : n.natureza === 'devolucao' ? 'Devolução de venda (sem cobrança)' : n.natureza === 'outra' ? 'Não é compra para revenda' : n.interna ? 'Compra interna (sem cobrança)' : 'Não localizada no app';
       E.itens.forEach(x => {
         const n = x.nota, it = x.item;
         aE.push([cell(+n.nf || n.nf), cell(n.serie), cell(n.mod), dtc(n.emissao), dtc(n.entrada), cell(n.fornecedor), cell(U.fmtCNPJ(n.cnpj)), cell(n.uf), cell(n.chave), cell(it[0]), cell(it[1]), cell(x.prod.nome || it[2]), cell(x.prod.gtin), cell(U.fmtNCM(x.prod.ncm)),
@@ -572,7 +697,7 @@
     const porCod = new Map(prods.map(p => [p.cod, p]));
     const hV = ['NF', 'Modelo', 'Data', 'Código', 'Produto', 'EAN/GTIN', 'NCM', 'CEST', 'Situação', 'CSOSN emitido', 'CSOSN correto', 'CFOP emitido', 'CFOP correto', 'Qtd', 'Valor (R$)', 'Desconto (R$)', 'Líquido (R$)'];
     const aV = [hV.map(v => cell(v))];
-    const linhas = an.docS.data.linhas.filter(l => { const p = porCod.get(l[0]); return p && L[p.sit].st && p.sit !== 'st_ja' && !jaST(l[6]) && (!filtroSit || filtroSit.includes(p.sit)); })
+    const linhas = an.docS.data.linhas.filter(l => { const p = porCod.get(l[0]); return p && L[p.sit].st && p.sit !== 'st_ja' && !jaSTL(l) && (!filtroSit || filtroSit.includes(p.sit)); })
       .sort((a, b) => String(a[3]).localeCompare(String(b[3])) || (+a[1] - +b[1]) || String(a[0]).localeCompare(String(b[0])));
     linhas.forEach((l, i) => {
       const p = porCod.get(l[0]), r = i + 2;
@@ -593,7 +718,7 @@
     const R = [
       [cell(`Vendas de ${U.refLabel(an.ref)} que deveriam ter saído como ST`)],
       [cell(`${nomeEmp}${c.cnpj ? ' - CNPJ ' + U.fmtCNPJ(c.cnpj) : ''}${c.ie ? ' - IE ' + c.ie : ''} - Simples Nacional${c.porte ? ' (' + c.porte + ')' : ''}${c.municipio ? ' - ' + c.municipio + '/' + (c.uf || '') : ''}`)],
-      [cell(`Fontes: ${an.docS.fileName}${an.docC ? '; ' + an.docC.fileName : ''}${an.entradas ? '; ' + an.entradas.docs.map(d => d.fileName).join('; ') : ''}; memórias de cálculo do ICMS-ST e da Equalização importadas no Revisor ICMS-ST; Subanexo I do Anexo III do RICMS/MS.`)],
+      [cell(`Fontes: ${U.uniq([an.docS.fileName].concat(an.docC ? [an.docC.fileName] : [], an.entradas ? an.entradas.docs.map(d => d.fileName) : [])).join('; ')}; memórias de cálculo do ICMS-ST e da Equalização importadas no Revisor ICMS-ST; Subanexo I do Anexo III do RICMS/MS.`)],
       [],
       [cell('1. Receitas do mês')],
       [cell(an.docC ? 'Receita bruta do mês no Controle do Simples (líquida de devoluções)' : 'Receita do mês (Registro de Saídas)'), cell(''), cell(an.tot.receitaMes, M)],

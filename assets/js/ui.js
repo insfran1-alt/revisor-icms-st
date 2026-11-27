@@ -49,7 +49,7 @@
     { id: 'tabelas', nome: 'Tabelas e regras', icon: 'sliders' },
     { id: 'ajuda', nome: 'Como usar', icon: 'help' }
   ];
-  const TIPO_DOC = { previa: 'Relatório de prévia', itens: 'Memória de cálculo', cnpj: 'Cartão CNPJ', nfe: 'XML da NF-e', saidas: 'Registro de Saídas', simples: 'Controle do Simples', entradas: 'SPED de entradas' };
+  const TIPO_DOC = { previa: 'Relatório de prévia', itens: 'Memória de cálculo', cnpj: 'Cartão CNPJ', nfe: 'XML da NF-e', saidas: 'Registro de Saídas', simples: 'Controle do Simples', entradas: 'Notas de entrada' };
   const MAKRO = ['saidas', 'simples', 'entradas'];
   const PAGE = 50;
 
@@ -333,7 +333,7 @@
           <div class="ico">${ic('upload')}</div>
           <h3>Arraste e solte os arquivos aqui</h3>
           <div class="muted">ou clique para selecionar — vários de uma vez, de várias empresas</div>
-          <div class="types"><span>Relatório de Prévia (PDF)</span><span>Dados da Nota (Excel ou PDF)</span><span>Memória ST (XLSX/CSV)</span><span>XML da NF-e</span><span>Cartão CNPJ (PDF)</span><span>Registro de Saídas e Controle do Simples (Makro, XLSX)</span><span>SPED Fiscal de entradas (TXT)</span></div>
+          <div class="types"><span>Relatório de Prévia (PDF)</span><span>Dados da Nota (Excel ou PDF)</span><span>Memória ST (XLSX/CSV)</span><span>XML da NF-e</span><span>Cartão CNPJ (PDF)</span><span>Registro de Saídas e Controle do Simples (Makro, XLSX)</span><span>SPED Fiscal de entradas (TXT)</span><span>Relação de Produtos por Nota (Domínio, XLS)</span></div>
           <div class="progress hidden" id="imp-progress"><span></span></div>
           <div class="tiny muted" id="imp-status"></div>
         </div>
@@ -353,7 +353,7 @@
       </div>
       <div class="card">
         <div class="card-head"><h3>Documentos importados</h3><span class="pill neutro">${App.state.docs.length}</span>
-          <div class="sp chips">${[['', 'Todos'], ['previa', 'Prévias'], ['itens', 'Memórias'], ['nfe', 'XML'], ['cnpj', 'Cartões CNPJ'], ['saidas', 'Saídas'], ['simples', 'Controle Simples'], ['entradas', 'SPED entradas']].map(([k, n]) => `<button type="button" class="chip ${kind === k ? 'on' : ''}" data-act="doc-kind" data-v="${k}">${n}${k ? ` (${(counts[k] || []).length})` : ''}</button>`).join('')}</div></div>
+          <div class="sp chips">${[['', 'Todos'], ['previa', 'Prévias'], ['itens', 'Memórias'], ['nfe', 'XML'], ['cnpj', 'Cartões CNPJ'], ['saidas', 'Saídas'], ['simples', 'Controle Simples'], ['entradas', 'Entradas']].map(([k, n]) => `<button type="button" class="chip ${kind === k ? 'on' : ''}" data-act="doc-kind" data-v="${k}">${n}${k ? ` (${(counts[k] || []).length})` : ''}</button>`).join('')}</div></div>
         <div class="table-wrap"><table class="data">
           <thead><tr><th>Arquivo</th><th>Tipo</th><th>Empresa</th><th>Ref.</th><th>NF</th><th class="num">Itens</th><th class="num">ICMS / valor</th><th>Vínculo</th><th>Avisos</th><th></th></tr></thead>
           <tbody>${docs.length ? docs.map(d => {
@@ -397,7 +397,7 @@
   function viewVendas() {
     App.vendasAn = null;
     const docs = relatoriosVendas();
-    const intro = `<div class="muted small">Importe o <b>Registro de Saídas Detalhado</b> e o <b>Controle de Cálculo do Simples Nacional</b> (Excel da Makro) de cada empresa e mês e, se tiver, o <b>SPED Fiscal</b> (TXT) com as notas de entrada. O app cruza as vendas com as memórias de ICMS-ST e de Equalização já importadas e com o Subanexo I, aponta os produtos que deveriam sair com CSOSN 500 e calcula o ICMS embutido no DAS pago a mais.</div>`;
+    const intro = `<div class="muted small">Importe o <b>Registro de Saídas Detalhado</b> e o <b>Controle de Cálculo do Simples Nacional</b> (Excel da Makro) de cada empresa e mês e, se tiver, o <b>SPED Fiscal</b> (TXT) com as notas de entrada. Quem usa a Domínio pode importar só a <b>Relação de Produtos por Nota</b> (XLS), que traz as vendas e as entradas. O app cruza as vendas com as memórias de ICMS-ST e de Equalização já importadas e com o Subanexo I, aponta os produtos que deveriam sair com CSOSN 500 e calcula o ICMS embutido no DAS pago a mais.</div>`;
     if (!docs.length) return `<div class="card empty"><div class="ico">${ic('layers')}</div><h3>Vendas que deveriam ser ST</h3>${intro}<div class="row" style="justify-content:center;margin-top:12px"><button class="btn primary" type="button" data-act="pick-files">${ic('upload')} Importar relatórios</button></div></div>`;
     const cid = App.ui.empresa, ref = App.ui.ref;
     const an = cid && ref ? V().analisar(App.state, App.model, cid, ref) : null;
@@ -442,18 +442,18 @@
     </div>`;
   }
 
-  const cobTxtEnt = n => n.cobST && n.cobEQ ? ['ICMS-ST e Equalização', 'ok'] : n.cobST ? ['ICMS-ST', 'ok'] : n.cobEQ ? ['Equalização', 'ok'] : n.interna ? ['Compra interna', 'neutro'] : ['Não localizada', 'moderada'];
+  const cobTxtEnt = n => n.cobST && n.cobEQ ? ['ICMS-ST e Equalização', 'ok'] : n.cobST ? ['ICMS-ST', 'ok'] : n.cobEQ ? ['Equalização', 'ok'] : n.natureza === 'devolucao' ? ['Devolução de venda', 'neutro'] : n.natureza === 'outra' ? ['Não é compra', 'neutro'] : n.interna ? ['Compra interna', 'neutro'] : ['Não localizada', 'moderada'];
   function calloutEntradas(an) {
     const E = an.entradas;
-    if (!E) return `<div class="callout warn"><b>SPED de entradas não importado:</b> importe o SPED Fiscal (EFD ICMS/IPI, TXT) do mês para conferir as notas de entrada, resolver os "conferir" e indicar o CFOP de entrada correto.</div>`;
-    const semCob = E.notas.filter(n => !n.cobST && !n.cobEQ && !n.interna).length;
-    return `<div class="callout ${semCob || E.semNota.length ? 'warn' : 'ok'}"><b>SPED de entradas (${h(E.refs.map(U.refLabel).join(', '))}):</b> ${E.notas.length} nota(s), ${U.brl(U.sum(E.notas, n => n.valor))}${semCob ? ` · ${semCob} interestadual(is) sem cobrança da SEFAZ no app` : ''}${E.semNota.length ? ` · <b>${E.semNota.length} cobrança(s) sem nota escriturada</b>` : ''}. Detalhes no fim da tela.</div>`;
+    if (!E) return `<div class="callout warn"><b>Notas de entrada não importadas:</b> importe o SPED Fiscal (EFD ICMS/IPI, TXT) ou a Relação de Produtos por Nota da Domínio do mês para conferir as notas de entrada, resolver os "conferir" e indicar o CFOP de entrada correto.</div>`;
+    const semCob = E.notas.filter(n => !n.cobST && !n.cobEQ && !n.interna && n.natureza === 'compra').length;
+    return `<div class="callout ${semCob || E.semNota.length ? 'warn' : 'ok'}"><b>Notas de entrada (${h(E.docs.some(d => d.data.formato === 'dominio-produtos-nota') ? 'Domínio' : 'SPED')}, ${h(E.refs.map(U.refLabel).join(', '))}):</b> ${E.notas.length} nota(s), ${U.brl(U.sum(E.notas, n => n.valor))}${semCob ? ` · ${semCob} interestadual(is) sem cobrança da SEFAZ no app` : ''}${E.semNota.length ? ` · <b>${E.semNota.length} cobrança(s) sem nota escriturada</b>` : ''}. Detalhes no fim da tela.</div>`;
   }
   function cardEntradas(an) {
     const E = an.entradas;
     if (!E) return '';
     return `<div class="card">
-      <div class="card-head"><h3>Notas de entrada (SPED)</h3><span class="pill neutro">${E.notas.length}</span><span class="sp muted small">Cruzadas com as cobranças de ICMS-ST e Equalização importadas no app.</span></div>
+      <div class="card-head"><h3>Notas de entrada</h3><span class="pill neutro">${E.notas.length}</span><span class="sp muted small">Cruzadas com as cobranças de ICMS-ST e Equalização importadas no app.</span></div>
       <div class="table-wrap"><table class="data"><thead><tr><th>NF</th><th>Emissão</th><th>Entrada</th><th>Fornecedor</th><th>UF</th><th class="num">Itens</th><th class="num">Valor</th><th>CFOP escriturado</th><th>Cobrança da SEFAZ</th></tr></thead><tbody>
         ${E.notas.map(n => { const [t, cls] = cobTxtEnt(n); return `<tr><td class="small nowrap">${h(n.nf)}${n.mod === '55' ? '' : `<div class="sub">mod. ${h(n.mod)}</div>`}</td><td class="small nowrap">${h(U.brDate(n.emissao))}</td><td class="small nowrap">${h(U.brDate(n.entrada))}</td><td class="small">${h(n.fornecedor)}<div class="sub">${h(U.fmtCNPJ(n.cnpj))}</div></td><td class="small">${h(n.uf)}</td><td class="num">${n.itens.length}</td><td class="num">${U.brl(n.valor)}</td><td class="small">${h(n.cfops.join(' / '))}</td><td><span class="pill ${cls}">${h(t)}</span></td></tr>`; }).join('')}
       </tbody></table></div>
@@ -623,8 +623,10 @@
     const n = U.normKey(dt.empresaNome);
     if (n) {
       const c = cs.find(x => [x.razaoSocial, x.nomeFantasia].some(s => { const k = U.normKey(s); return k && (k === n || (k.length >= 6 && (n.includes(k) || k.includes(n)))); }));
-      if (c) return c;
+      if (c && !(dt.cnpj && U.digits(c.cnpj) && U.digits(c.cnpj) !== dt.cnpj)) return c;
     }
+    // relatório com CNPJ de empresa não cadastrada: não vincula a outra empresa por engano
+    if (dt.cnpj) return null;
     return cs.find(x => x.id === App.ui.empresa) || (cs.length === 1 ? cs[0] : null);
   }
 
@@ -632,7 +634,11 @@
     if (d.kind === 'desconhecido' || d.kind === 'erro') { res.erros.push(`${d.fileName}: ${(d.warnings || []).join(' ')}`); return null; }
     if (App.state.docs.some(x => x.hash === d.hash && (x.part || 0) === (d.part || 0))) { res.dup.push(d.fileName); return null; }
     const doc = Object.assign({ id: U.uid(), importedAt: new Date().toISOString(), link: {} }, d);
-    if (doc.kind === 'cnpj') { const c = upsertCompanyFromCartao(doc.data); doc.link = { companyId: c.id }; res.empresas.push(nomeCurto(c)); }
+    if (doc.kind === 'cnpj') {
+      const c = upsertCompanyFromCartao(doc.data); doc.link = { companyId: c.id }; res.empresas.push(nomeCurto(c));
+      // relatórios importados antes do cartão (com o CNPJ no conteúdo) ficam vinculados agora
+      App.state.docs.filter(x => MAKRO.includes(x.kind) && x.link && !x.link.companyId && x.data.cnpj && x.data.cnpj === U.digits(c.cnpj)).forEach(x => { x.link.companyId = c.id; x.warnings = (x.warnings || []).filter(w => !/não cadastrada/.test(w)); });
+    }
     if (doc.kind === 'previa') {
       const c = companyForPrevia(doc.data);
       doc.link = { companyId: c.id };
@@ -642,8 +648,8 @@
     if (MAKRO.includes(doc.kind)) {
       const c = companyForMakro(doc.data);
       doc.link = { companyId: c ? c.id : '', referencia: doc.data.referencia || '' };
-      if (!c) doc.warnings = (doc.warnings || []).concat(doc.kind === 'entradas' ? `Empresa do CNPJ ${U.fmtCNPJ(doc.data.cnpj)} não cadastrada: importe o cartão CNPJ ou defina-a no vínculo do documento (ícone de lápis).` : 'Empresa não identificada pelo nome do arquivo: defina-a no vínculo do documento (ícone de lápis).');
-      else if (doc.kind === 'entradas' && doc.data.cnpj && U.digits(c.cnpj) && U.digits(c.cnpj) !== doc.data.cnpj) doc.warnings = (doc.warnings || []).concat(`O SPED é do CNPJ ${U.fmtCNPJ(doc.data.cnpj)}, diferente da empresa vinculada.`);
+      if (!c) doc.warnings = (doc.warnings || []).concat(doc.data.cnpj ? `Empresa do CNPJ ${U.fmtCNPJ(doc.data.cnpj)} (${doc.data.empresaNome || 'sem nome'}) não cadastrada: importe o cartão CNPJ ou defina-a no vínculo do documento (ícone de lápis).` : 'Empresa não identificada pelo nome do arquivo: defina-a no vínculo do documento (ícone de lápis).');
+      else if (doc.data.cnpj && U.digits(c.cnpj) && U.digits(c.cnpj) !== doc.data.cnpj) doc.warnings = (doc.warnings || []).concat(`O relatório é do CNPJ ${U.fmtCNPJ(doc.data.cnpj)}, diferente da empresa vinculada.`);
       else {
         if (doc.data.codEscritorio && !c.codEscritorio) c.codEscritorio = doc.data.codEscritorio;
         const old = App.state.docs.filter(x => x.kind === doc.kind && x.link && x.link.companyId === c.id && (x.link.referencia || x.data.referencia) === doc.link.referencia);
@@ -1768,6 +1774,7 @@
         <h3>Vendas × ST</h3>
         <p>Importe o <b>Registro de Saídas Detalhado</b> e o <b>Controle de Cálculo do Simples Nacional</b> (Excel do sistema contábil Makro) de cada empresa e mês. A empresa é reconhecida pelo nome do arquivo (ex.: "575 - RAZÃO SOCIAL - RegSaidasDetalhado 10 2026"). Na tela <b>Vendas × ST</b>, o app cruza cada produto vendido com as memórias de ICMS-ST e de Equalização da empresa e com o Subanexo I: ST cobrado na entrada, a conferir, já emitido como ST, Equalização, preparado na loja ou fora da ST. Ajuste a situação ou o CEST de cada produto quando precisar. A alíquota do DAS vem do Anexo I pela RBT12 (proporcional no início de atividade); confira com o extrato do PGDAS-D. O Excel traz o resumo do ICMS pago a mais, o cadastro para o ERP (CEST, CSOSN 500, CFOP 5405) e as vendas nota a nota.</p>
         <p>Importe também o <b>SPED Fiscal</b> (EFD ICMS/IPI, arquivo TXT) do mês: o app lê as notas de entrada, reconhece a empresa pelo CNPJ e cruza cada nota com as cobranças da SEFAZ. Os produtos "a conferir" passam a mostrar a NF de entrada; compras dentro do estado ou com ICMS-ST destacado viram "ICMS-ST retido antes". O Excel ganha o CFOP de entrada correto (2403/1403) no cadastro e a aba "Entradas (SPED)", com as cobranças da SEFAZ que não têm nota escriturada.</p>
+        <p>Sem SPED e sem os relatórios da Makro? A <b>Relação de Produtos por Nota</b> da Domínio (Excel com entradas e saídas, item a item) substitui os dois: o app separa as vendas (CFOP 5102 tributado, 5405 já como ST) e as compras. As compras com CFOP 2403 ou com ICMS-ST lançado (no campo próprio ou em despesas acessórias) marcam o produto como "ICMS-ST retido antes". Devoluções de cliente, fretes e remessas não contam como origem do produto. Esse relatório não traz GTIN nem CEST: o vínculo é pelo código do produto na Domínio e pelo NCM.</p>
         <div class="callout warn">Ferramenta de apoio. Os textos de fundamentação são modelos: confira a redação vigente das normas, as MVAs do Subanexo I do RICMS/MS e os documentos antes de protocolar.</div>
       </div>
       <div class="card">

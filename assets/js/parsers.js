@@ -39,6 +39,27 @@
     return out;
   }
 
+  /** .xls (BIFF8) com a posição das abas errada no registro BOUNDSHEET (ex.: exportação da Domínio): o Excel abre,
+   * mas a biblioteca de planilhas descarta as abas. Regrava as posições com os BOF reais de cada aba. */
+  function corrigirXlsBiff(buf) {
+    const X = global.XLSX;
+    const cfb = X.CFB.read(new Uint8Array(buf), { type: 'array' });
+    const ent = X.CFB.find(cfb, 'Workbook') || X.CFB.find(cfb, 'Book');
+    if (!ent) return new Uint8Array(buf);
+    const w = Uint8Array.from(ent.content);
+    const dv = new DataView(w.buffer);
+    const bofs = [], bss = [];
+    for (let p = 0; p + 4 <= w.length;) {
+      const t = dv.getUint16(p, true), l = dv.getUint16(p + 2, true);
+      if (t === 0x809 && p > 0) bofs.push(p);
+      if (t === 0x85) bss.push(p);
+      p += 4 + l;
+    }
+    bss.forEach((q, i) => { if (bofs[i] !== undefined) dv.setUint32(q + 4, bofs[i], true); });
+    ent.content = w; ent.size = w.length;
+    return X.CFB.write(cfb, { type: 'array' });
+  }
+
   function parseCartaoCNPJ(pdf) {
     const warnings = [];
     const ls = lines(pdf.streamText);
@@ -577,10 +598,11 @@
         else out.push({ kind: 'desconhecido', data: { amostra: t.slice(0, 300) }, warnings: ['Formato de PDF não reconhecido. Envie o Relatório de Prévia, a tela "Dados da Nota", a memória de cálculo em planilha ou o cartão CNPJ.'] });
       } else if (['xlsx', 'xlsm', 'xls', 'ods'].includes(ext)) {
         if (!global.XLSX) throw new Error('Biblioteca de planilhas não carregada (verifique a conexão).');
-        const wb = global.XLSX.read(new Uint8Array(buf), { type: 'array' });
+        let wb = global.XLSX.read(new Uint8Array(buf), { type: 'array' });
+        if (ext === 'xls' && wb.SheetNames.some(sn => !wb.Sheets[sn])) wb = global.XLSX.read(corrigirXlsBiff(buf), { type: 'array' });
         // relatórios do sistema contábil (Makro): Registro de Saídas Detalhado e Controle de Cálculo do Simples
         const mk = global.RST_VENDAS ? global.RST_VENDAS.lerPlanilhaMakro(wb, name) : null;
-        if (mk) out.push(mk);
+        if (mk) [].concat(mk).forEach(d => out.push(d));
         else wb.SheetNames.forEach(sn => {
           const rows = global.XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: '' });
           const numSheet = /\d{3,9}/.test(sn) ? String(+sn.match(/\d{3,9}/)[0]) : '';
