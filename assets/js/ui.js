@@ -43,6 +43,7 @@
     { id: 'importar', nome: 'Importar', icon: 'upload' },
     { id: 'revisao', nome: 'Revisão', icon: 'checklist' },
     { id: 'notas', nome: 'Notas e itens', icon: 'file' },
+    { id: 'daems', nome: 'Recolhimentos (DAEMS)', icon: 'save' },
     { id: 'vendas', nome: 'Vendas × ST', icon: 'layers' },
     { id: 'empresas', nome: 'Empresas', icon: 'building' },
     { id: 'tabelas', nome: 'Tabelas e regras', icon: 'sliders' },
@@ -128,7 +129,7 @@
     const v = VIEWS.find(x => x.id === App.ui.view) || VIEWS[0];
     $('#view-title').textContent = v.nome;
     document.title = `${v.nome} · Revisor ICMS-ST`;
-    const fn = { painel: viewPainel, importar: viewImportar, revisao: viewRevisao, notas: viewNotas, vendas: viewVendas, empresas: viewEmpresas, tabelas: viewTabelas, ajuda: viewAjuda }[v.id];
+    const fn = { painel: viewPainel, importar: viewImportar, revisao: viewRevisao, notas: viewNotas, vendas: viewVendas, daems: viewDaems, empresas: viewEmpresas, tabelas: viewTabelas, ajuda: viewAjuda }[v.id];
     $('#view').innerHTML = fn();
     if (v.id === 'revisao') renderRevResults();
     if (v.id === 'notas') renderNotasView();
@@ -479,6 +480,81 @@
     const v = campo === 'cest' ? U.digits(t.value) : t.value;
     if (v) o[campo] = v; else delete o[campo];
     if (Object.keys(o).length) porEmp[cod] = o; else delete porEmp[cod];
+    commit();
+  }
+
+  /* ============================================================
+   * Recolhimentos (DAEMS) — DIFAL e Equalização que continuam devidos nos itens revisados
+   * ============================================================ */
+  const DA = () => global.RST_DAEMS;
+  const gruposDaems = (findings) => DA().apurar(App.model, findings || App.model.findings.filter(inScope), E.settingsOf(App.state), App.state.daems);
+  /** Aviso dos DAEMS que faltam informar (para o requerimento e o 1º pedido). */
+  function avisoDaems(grupos) {
+    if (!grupos.length) return '';
+    const falta = grupos.filter(g => !g.ok);
+    return `<div class="callout ${falta.length ? 'warn' : 'ok'}"><b>Imposto que continua devido nos itens revisados:</b> ${grupos.map(g => `${h(DA().TIPOS[g.tipo].curto)} ${U.brl(g.total)}${g.ok ? ` — DAEMS ${h(g.daems.numero)}` : ' — <b>sem DAEMS</b>'}`).join(' · ')}.
+      ${falta.length ? 'Emita o DAEMS e informe o número em <i>Recolhimentos</i>: ele entra na justificativa do pedido e no requerimento.' : 'Os números dos DAEMS já entram nas justificativas e no requerimento.'}
+      <button class="btn sm" type="button" data-go="daems">${ic('save')} Recolhimentos (DAEMS)</button></div>`;
+  }
+
+  function viewDaems() {
+    const grupos = gruposDaems();
+    const D = DA();
+    if (!grupos.length) return `<div class="card empty"><div class="ico">${ic('save')}</div><h3>Nenhum DIFAL ou Equalização a recolher no escopo</h3>
+      <p>Aparecem aqui os itens revisados que continuam com imposto devido: bens de uso e consumo, brinde ou degustação (DIFAL) e insumos ou itens fora da ST (Equalização). Escolha a empresa e a referência no topo, ou marque a destinação dos itens na Revisão.</p></div>`;
+    const tot = t => U.sum(grupos.filter(g => g.tipo === t), g => g.total);
+    const ok = grupos.filter(g => g.ok).length;
+    return `<div class="stack">
+      <div class="card hero">
+        <div>
+          <div class="muted small">Imposto que continua devido nos itens revisados · ${h(App.ui.empresa ? nomeCurto(App.model.companies.get(App.ui.empresa)) : 'todas as empresas')}${App.ui.ref ? ' · ref. ' + h(U.refLabel(App.ui.ref)) : ''}</div>
+          <div class="big">${U.brl(tot('DIFAL') + tot('EQ'))}</div>
+          <p class="lead">DIFAL ${U.brl(tot('DIFAL'))} · Equalização ${U.brl(tot('EQ'))} · ${ok}/${grupos.length} DAEMS informado(s)</p>
+        </div>
+        <div class="stack">
+          <div class="callout">Emita o DAEMS de cada valor (empresa, referência e imposto) e informe o número no formato <b>01.170.776.181-49</b>. O número entra na <b>justificativa do 1º pedido</b> no e-Fazenda e no <b>requerimento</b>, com a memória de cálculo anexa.</div>
+          <div class="row"><button class="btn primary" type="button" data-act="export-daems">${ic('download')} Memória de cálculo (Excel)</button><button class="btn" type="button" data-act="open-efazenda">${ic('list')} 1º pedido (e-Fazenda)</button></div>
+        </div>
+      </div>
+      ${grupos.map(g => {
+        const c = App.model.companies.get(g.companyId);
+        const k = h(g.key), d = g.daems;
+        const dif = d.valor !== '' && d.valor !== null && d.valor !== undefined ? U.round2(+d.valor - g.total) : null;
+        return `<div class="card">
+          <div class="card-head"><h3>${h(nomeCurto(c))} · Ref. ${h(U.refLabel(g.referencia))} · ${h(D.TIPOS[g.tipo].nome)}</h3>
+            <span class="pill ${g.ok ? 'ok' : 'moderada'}">${g.ok ? 'DAEMS ' + h(d.numero) : 'Falta o DAEMS'}</span>
+            <span class="sp"><b>${U.brl(g.total)}</b> <button class="btn sm ghost" type="button" data-act="copy-text" data-text="${h(U.fmt(g.total, 2))}" title="Copiar o valor">${ic('copy')}</button></span></div>
+          <div class="card-pad stack">
+            <div class="grid g3">
+              <label class="field"><span>Nº do DAEMS</span><input type="text" data-dae="${k}" data-k="numero" value="${h(d.numero)}" placeholder="01.170.776.181-49" maxlength="17" inputmode="numeric"></label>
+              <label class="field"><span>Valor do DAEMS (R$)</span><input type="text" data-dae="${k}" data-k="valor" value="${d.valor !== '' ? h(U.fmt(+d.valor, 2)) : ''}" placeholder="${h(U.fmt(g.total, 2))}" inputmode="decimal"></label>
+              <label class="field"><span>Vencimento</span><input type="date" data-dae="${k}" data-k="vencimento" value="${h(d.vencimento)}"></label>
+              <label class="field"><span>Pago em</span><input type="date" data-dae="${k}" data-k="pagoEm" value="${h(d.pagoEm)}"></label>
+              <label class="field" style="grid-column:span 2"><span>Observação</span><input type="text" data-dae="${k}" data-k="obs" value="${h(d.obs)}" placeholder="opcional"></label>
+            </div>
+            ${dif !== null && Math.abs(dif) > 0.009 ? `<div class="callout warn">O valor do DAEMS difere da memória de cálculo em ${U.brl(dif)}.</div>` : ''}
+            <div class="table-wrap"><table class="data"><thead><tr><th>NF</th><th>Item</th><th class="num">ICMS-ST cobrado</th><th class="num">Valor da operação</th><th class="num">Alíq. inter.</th><th class="num">Alíq. interna</th><th class="num">ICMS origem</th><th class="num">Base</th><th class="num">Devido</th></tr></thead><tbody>
+              ${g.linhas.map(l => `<tr><td class="nowrap"><b>${h(l.numero)}</b><div class="sub">${h(U.fmtCNPJ(l.cnpjRemetente || ''))}${l.ufRemetente ? '/' + h(l.ufRemetente) : ''}</div></td><td class="desc small"><b>${h(l.descricao)}</b><div class="sub">NCM ${h(U.fmtNCM(l.ncm))} · ${h(l.regra)}</div></td>
+                <td class="num">${U.brl(l.icmsCobrado)}</td><td class="num">${U.brl(l.valorOperacao)}</td><td class="num">${U.fmt(l.aliqInter, 2)}%</td><td class="num">${U.fmt(l.aliqIntra, 2)}%</td><td class="num">${l.icmsOrigem !== null ? U.brl(l.icmsOrigem) : '—'}</td><td class="num">${U.brl(l.bc)}</td><td class="num"><b>${U.brl(l.devido)}</b></td></tr>`).join('')}
+            </tbody><tfoot><tr><th colspan="8">Total</th><th class="num">${U.brl(g.total)}</th></tr></tfoot></table></div>
+            <div class="small muted">${h(g.linhas[0].metodo)}. Fundamento: ${h(D.TIPOS[g.tipo].base)}.</div>
+          </div></div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  function setDaems(t) {
+    const key = t.dataset.dae, k = t.dataset.k;
+    const o = Object.assign({}, App.state.daems[key]);
+    let v = t.value.trim();
+    if (k === 'numero' && v) {
+      v = DA().fmtDaems(v);
+      if (!DA().MASK.test(v)) toast('Número do DAEMS incompleto: use o formato 01.170.776.181-49 (13 dígitos).', 'err', 6000);
+    }
+    if (k === 'valor' && v) { const n = parseFloat(v.replace(/\./g, '').replace(',', '.')); v = isNaN(n) ? '' : U.round2(n); }
+    if (v === '' || v === null) delete o[k]; else o[k] = v;
+    o.atualizadoEm = new Date().toISOString();
+    if (Object.keys(o).filter(x => x !== 'atualizadoEm').length) App.state.daems[key] = o; else delete App.state.daems[key];
     commit();
   }
 
@@ -1658,6 +1734,8 @@
         <p>Pela Resolução SEFAZ nº 3.033/2019, o optante pelo Simples Nacional pede a revisão eletrônica no e-Fazenda (módulo Informações Fiscais). É <b>um pedido por mês de referência e por tributo</b> — por isso o sistema consolida tudo antes. Até o vencimento, as NFs contestadas ficam desvinculadas até a decisão (15 dias úteis). Depois, use o e-SAP (nova revisão, reconsideração ou restituição — Res. SEFAZ nº 3.426/2025).</p>
         <h3>Dica para o Simples Nacional</h3>
         <p>Os produtos cujo ICMS-ST foi pago devem sair com <b>CSOSN 500</b> e ter a receita segregada no PGDAS-D como "com substituição tributária" (LC nº 123/2006, art. 18, § 4º-A, I) — assim o ICMS não é pago de novo no DAS. Use o botão <b>Produtos c/ ST</b> na tela de Revisão para gerar a lista.</p>
+        <h3>Recolhimentos (DAEMS)</h3>
+        <p>Itens revisados de uso e consumo, brinde ou degustação continuam com <b>DIFAL</b> devido, e insumos e itens fora da ST continuam com <b>Equalização</b>. A tela <b>Recolhimentos (DAEMS)</b> soma esses valores por empresa, referência e imposto e mostra a memória de cálculo. Emita o DAEMS e informe o número (ex.: 01.170.776.181-49): ele passa a constar da justificativa do 1º pedido no e-Fazenda e do requerimento, com a memória anexa. O botão Excel gera a memória de cálculo para apresentar quando a SEFAZ pedir.</p>
         <h3>Vendas × ST</h3>
         <p>Importe o <b>Registro de Saídas Detalhado</b> e o <b>Controle de Cálculo do Simples Nacional</b> (Excel do sistema contábil Makro) de cada empresa e mês. A empresa é reconhecida pelo nome do arquivo (ex.: "575 - RAZÃO SOCIAL - RegSaidasDetalhado 10 2026"). Na tela <b>Vendas × ST</b>, o app cruza cada produto vendido com as memórias de ICMS-ST e de Equalização da empresa e com o Subanexo I: ST cobrado na entrada, a conferir, já emitido como ST, Equalização, preparado na loja ou fora da ST. Ajuste a situação ou o CEST de cada produto quando precisar. A alíquota do DAS vem do Anexo I pela RBT12 (proporcional no início de atividade); confira com o extrato do PGDAS-D. O Excel traz o resumo do ICMS pago a mais, o cadastro para o ERP (CEST, CSOSN 500, CFOP 5405) e as vendas nota a nota.</p>
         <div class="callout warn">Ferramenta de apoio. Os textos de fundamentação são modelos: confira a redação vigente das normas, as MVAs do Subanexo I do RICMS/MS e os documentos antes de protocolar.</div>
@@ -1701,7 +1779,7 @@
     const groups = reqCandidates();
     const keys = Object.keys(groups).sort();
     const fs = reqFindings();
-    const res = fs.length ? R.requerimentoHTML(App.model, { companyId: o.companyId, referencia: o.referencia, tipo: o.tipo, findings: fs, data: o.data, signatario: o.signatario }) : null;
+    const res = fs.length ? R.requerimentoHTML(App.model, { companyId: o.companyId, referencia: o.referencia, tipo: o.tipo, findings: fs, data: o.data, signatario: o.signatario, settings: E.settingsOf(App.state), daems: App.state.daems }) : null;
     App.reqHTML = res ? res.html : '';
     const label = k => { const [c, r, t] = k.split('|'); return `${nomeCurto(App.model.companies.get(c))} · ref. ${U.refLabel(r)} · ${t === 'ST' ? 'ICMS-ST' : 'Equalização'}`; };
     openModal(`<div class="mh"><h3>Requerimento de revisão</h3>
@@ -1720,7 +1798,7 @@
           <label class="field" style="flex-direction:row;align-items:center;gap:6px"><span>Signatário</span><input type="text" data-req="sig-nome" value="${h(o.signatario.nome)}" placeholder="Nome"></label>
           <input type="text" data-req="sig-cargo" value="${h(o.signatario.cargo)}" placeholder="Cargo / CRC" aria-label="Cargo">
         </div>
-        ${res ? `<div class="small"><b>${fs.length}</b> achado(s) · total a revisar <b>${U.brl(res.totalRev)}</b> de ${U.brl(res.totalCobrado)} cobrados · ${res.cons.filter(x => x.integral).length} NF para desvincular e ${res.cons.filter(x => !x.integral).length} com revisão parcial</div>` : '<div class="callout warn">Nenhum achado com os filtros escolhidos.</div>'}
+        ${res ? `<div class="small"><b>${fs.length}</b> achado(s) · total a revisar <b>${U.brl(res.totalRev)}</b> de ${U.brl(res.totalCobrado)} cobrados · ${res.cons.filter(x => x.integral).length} NF para desvincular e ${res.cons.filter(x => !x.integral).length} com revisão parcial</div>${avisoDaems(gruposDaems(fs))}` : '<div class="callout warn">Nenhum achado com os filtros escolhidos.</div>'}
         <iframe id="req-frame" title="Pré-visualização do requerimento" sandbox=""></iframe>
       </div>`);
     const fr = $('#req-frame');
@@ -1747,7 +1825,8 @@
     const doReq = origem === 'req' && App.reqOpts;
     const fs = (doReq ? reqFindings() : filteredFindings()).filter(f => f.valorRevisar > 0);
     const txt = R.listaEFazenda(App.model, fs);
-    const grupos = R.pedidoEFazenda(App.model, fs);
+    const grupos = R.pedidoEFazenda(App.model, fs, App.state.daems);
+    const aviso = avisoDaems(gruposDaems(fs));
     App.efazGrupos = grupos;
     const copia = (t, lim) => `<div class="efz-campo"><span>${h(t)}</span><span class="efz-acoes">${lim ? `<span class="tiny muted">${t.length}/${lim}</span>` : ''}<button class="btn sm ghost" type="button" data-act="copy-text" data-text="${h(t)}" title="Copiar">${ic('copy')}</button></span></div>`;
     const nfCel = n => `<b>${h(n.numero)}</b><div class="sub">${h(U.fmtCNPJ(n.cnpj))}${n.uf ? '/' + h(n.uf) : ''}${n.razao ? ' · ' + h(n.razao) : ''}</div>`;
@@ -1767,6 +1846,7 @@
       </div></div>`).join('');
     openModal(`<div class="mh"><h3>Pedido no e-Fazenda — Revisão de NF</h3>${doReq ? `<button class="btn ghost" type="button" data-act="open-req" data-cid="${h(App.reqOpts.companyId)}" data-ref="${h(App.reqOpts.referencia)}">${ic('doc')} Voltar ao requerimento</button>` : ''}<button class="btn" type="button" data-act="export-efaz" ${grupos.length ? '' : 'disabled'}>${ic('download')} Excel</button><button class="btn" type="button" data-act="copy-efaz">${ic('copy')} Copiar resumo</button><button class="btn icon ghost" type="button" data-act="close-modal" aria-label="Fechar">${ic('x')}</button></div>
       <div class="mb stack"><div class="callout">Montado como a tela <b>Informações Fiscais → Revisão de NF</b>: a aba <b>Notas a Desvincular</b> recebe a nota inteira; a aba <b>Notas a Alterar</b>, item a item. Em cada linha, escolha o <b>Motivo</b> indicado e, no quadro "Confirmação de Dados", cole a <b>Descrição</b> (até ${R.LIM_DESC} caracteres) e a <b>Justificativa</b> (até ${R.LIM_JUST}). ${doReq ? 'Considera os mesmos achados do requerimento (empresa, referência, tributo e forças escolhidos lá).' : 'Considera os achados do filtro atual da Revisão, sem os descartados.'} Este é o <b>1º pedido</b> (até o vencimento); o requerimento em Word serve para o e-SAP (nova revisão, reconsideração ou restituição). Um pedido por mês de referência e por tributo.</div>
+      ${aviso}
       ${blocos || '<div class="muted">Nenhum valor a revisar no filtro atual.</div>'}
       <textarea id="efaz-text" hidden readonly>${h(txt)}</textarea></div>`);
   }
@@ -1847,6 +1927,10 @@
       catch (e) { toast('Não foi possível gerar a planilha: ' + h(e.message), 'err'); }
     },
     'export-sos': () => exportarSOS(),
+    'export-daems': () => {
+      try { const r = DA().exportar(App.model, gruposDaems(), `memoria-difal-equalizacao${App.ui.ref ? '-' + App.ui.ref : ''}-${U.today()}.xlsx`); toast(`Memória de cálculo gerada: ${r.itens} item(ns) em ${r.grupos} DAEMS.`, 'ok'); }
+      catch (e) { console.error(e); toast('Não foi possível gerar a planilha: ' + h(e.message), 'err'); }
+    },
     'vendas-filtro': el => {
       App.ui.vendas.sit = el.dataset.v; savePrefs();
       el.parentElement.querySelectorAll('[data-act="vendas-filtro"]').forEach(b => b.classList.toggle('on', b === el));
@@ -2036,6 +2120,7 @@
       return commit({ render: false });
     }
     if (t.matches('[data-req]')) return onReqChange(t);
+    if (t.matches('[data-dae]')) return setDaems(t);
     if (t.matches('[data-vpar]')) return setVendasParam(t);
     if (t.matches('[data-vaj]')) return setVendasAjuste(t, 'sit');
     if (t.matches('[data-vcest]')) return setVendasAjuste(t, 'cest');

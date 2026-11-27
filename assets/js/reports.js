@@ -132,6 +132,17 @@
       const lista = its.slice(0, 12).map(f => `NF ${e(f.numero)}${f.descricao ? ' — ' + e(f.descricao) : ''} (${U.brl(f.valorRevisar)})`).join('; ');
       return `<h3>2.${i + 1}. ${e(R.nome)}</h3><p>${e(R.direito)}</p><p class="small">Ocorrências: ${lista}${its.length > 12 ? `; e mais ${its.length - 12}` : ''}.</p>`;
     }).join('');
+    // o que continua devido (DIFAL / Equalização) nos itens revisados e os DAEMS emitidos
+    const D = global.RST_DAEMS;
+    const dev = D && opts.settings ? D.apurar(model, fs, opts.settings, opts.daems || {}) : [];
+    const secDev = dev.length ? `<h3>1.2. Valores que continuam devidos e seu recolhimento</h3>
+      <p>Sobre os itens revisados permanece devido o imposto abaixo, calculado sem MVA, ${dev.every(g => g.ok) ? 'já recolhido nos DAEMS indicados' : 'a ser recolhido em DAEMS próprio'}. A memória de cálculo, item a item, segue anexa.</p>
+      <table><thead><tr><th>Imposto</th><th class="num">Itens</th><th class="num">Valor devido</th><th>Nº do DAEMS</th><th class="num">Valor do DAEMS</th><th>Fundamento</th></tr></thead><tbody>
+      ${dev.map(g => `<tr><td>${e(D.TIPOS[g.tipo].nome)}</td><td class="num">${g.linhas.length}</td><td class="num">${U.brl(g.total)}</td><td>${e(g.daems.numero || '(a informar)')}</td><td class="num">${g.daems.valor !== '' ? U.brl(+g.daems.valor) : ''}</td><td class="small">${e(D.TIPOS[g.tipo].base)}</td></tr>`).join('')}</tbody></table>` : '';
+    const anexoDev = dev.length ? `<div class="anexo"><h2>Anexo — Memória de cálculo do DIFAL e da Equalização</h2>${dev.map(g => `<h3>${e(D.TIPOS[g.tipo].nome)}${g.daems.numero ? ` — DAEMS nº ${e(g.daems.numero)}` : ''}</h3>
+      <table><thead><tr><th>NF</th><th>Item</th><th class="num">Valor da operação</th><th class="num">Alíq. inter.</th><th class="num">Alíq. interna</th><th class="num">ICMS origem</th><th class="num">Base de cálculo</th><th class="num">Devido</th></tr></thead><tbody>
+      ${g.linhas.map(l => `<tr><td>${e(l.numero)}</td><td>${e(l.descricao)}</td><td class="num">${U.brl(l.valorOperacao)}</td><td class="num">${U.fmt(l.aliqInter, 2)}%</td><td class="num">${U.fmt(l.aliqIntra, 2)}%</td><td class="num">${l.icmsOrigem !== null ? U.brl(l.icmsOrigem) : '—'}</td><td class="num">${U.brl(l.bc)}</td><td class="num">${U.brl(l.devido)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><th colspan="7">Total</th><th class="num">${U.brl(g.total)}</th></tr></tfoot></table><p class="small">${e(g.linhas[0].metodo)}.</p>`).join('')}</div>` : '';
     const anexo = fs.map((f, i) => `<p><b>${i + 1}. NF ${e(f.numero)}${f.descricao ? ' — ' + e(f.descricao) : ''}</b> · ${e(f.regra)} · a revisar ${U.brl(f.valorRevisar)}<br>${e(f.fundamentacao)}<br><span class="small">Base legal: ${e(L.citacoes(f.baseLegal).join('; '))}</span></p>`).join('');
 
     const body = `
@@ -146,17 +157,19 @@
       <tfoot><tr><th colspan="3">Total</th><th class="num">${U.brl(U.sum(cons, x => x.ch.valorICMS))}</th><th class="num">${U.brl(totalRev)}</th><th></th></tr></tfoot></table>
       <h3>1.1. Detalhamento por item</h3>
       <table><thead><tr><th>NF</th><th>Item</th><th>NCM / CEST</th><th class="num">ICMS cobrado</th><th class="num">A revisar</th><th>Motivo</th></tr></thead><tbody>${tabItens}</tbody></table>
+      ${secDev}
       <h2>2. Do direito</h2>${direito}
       <h2>3. Do pedido</h2>
       <p>Diante do exposto, requer:</p>
       <p>a) ${integrais.length ? `a desvinculação, da cobrança do ${e(trib)} da referência ${e(ref)}, das NF ${e(integrais.map(x => x.ch.numero).join(', '))}` : ''}${integrais.length && parciais.length ? '; e ' : ''}${parciais.length ? `a revisão parcial das NF ${e(parciais.map(x => x.ch.numero).join(', '))}, com a exclusão dos itens e valores relacionados no item 1.1` : ''}, reduzindo-se a exigência em ${U.brl(totalRev)};</p>
       <p>b) caso algum valor já tenha sido recolhido, a restituição do indébito, devidamente atualizado (CTN, art. 165, I; Resolução SEFAZ nº 3.426/2025);</p>
-      <p>c) a juntada dos documentos anexos e, se necessário, a intimação para apresentação de documentos complementares (Resolução SEFAZ nº 3.033/2019, art. 1º, § 2º).</p>
+      ${dev.length ? `<p>c) o reconhecimento de que o imposto que permanece devido sobre os itens revisados (${e(dev.map(g => `${D.TIPOS[g.tipo].curto} de ${U.brl(g.total)}`).join(' e '))}) ${dev.every(g => g.ok) ? `foi recolhido no(s) DAEMS nº ${e(dev.map(g => g.daems.numero).join(', '))}` : 'será recolhido em DAEMS próprio'}, conforme memória de cálculo anexa;</p>` : ''}
+      <p>${dev.length ? 'd' : 'c'}) a juntada dos documentos anexos e, se necessário, a intimação para apresentação de documentos complementares (Resolução SEFAZ nº 3.033/2019, art. 1º, § 2º).</p>
       <h2>4. Documentos anexos</h2>
       <ul>${docs.map(d => `<li>${e(d)}</li>`).join('')}<li>Relatório de Prévia com Cálculos ICMS da referência ${e(ref)} e respectivas memórias de cálculo.</li></ul>
       <p>Termos em que pede deferimento.</p>
       <div class="ass"><div class="linha"></div>${e(sig.nome || 'Representante legal / contador responsável')}<br>${e(sig.cargo || '')}<br>${e(c.razaoSocial || '')} — CNPJ ${e(U.fmtCNPJ(c.cnpj || ''))}</div>
-      <div class="anexo"><h2>Anexo — Fundamentação por item</h2>${anexo}</div>`;
+      <div class="anexo"><h2>Anexo — Fundamentação por item</h2>${anexo}</div>${anexoDev}`;
     return { html: wrapDoc(`Pedido de revisão — ${c.razaoSocial || ''} — ${ref}`, body), totalRev, totalCobrado, cons };
   }
 
@@ -231,30 +244,45 @@
   }
   const semPontoFinal = s => String(s || '').trim().replace(/[.;]+$/, '');
   /** Justificativa curta, escrita para a SEFAZ, de cada tipo de achado (com a norma principal). */
+  // com o nº do DAEMS (dae), o texto informa o recolhimento do que continua devido — cabe nos 199 caracteres
+  const caber = (comCit, semCit) => comCit.length <= LIM_JUST - 1 ? comCit : semCit;
   const CURTO = {
-    ST_USO: f => `Mercadoria para ${/degust|brinde|amostra/i.test(f.resumo) ? 'degustação/brinde' : 'uso e consumo'}, não revendida: ST indevida${f.valorDevido ? `; devido só o diferencial de alíquotas (${U.brl(f.valorDevido)})` : ''} (CF art. 150 §7º; LC 87/96 art. 10)`,
-    ST_INSUMO: f => `Insumo usado no preparo de alimentos, não revendido: ST indevida${f.valorDevido ? `; devida só a Equalização (${U.brl(f.valorDevido)})` : ''} (CF art. 150 §7º; Dec. 15.055/2018)`,
+    ST_USO: (f, dae) => {
+      const dest = /degust|brinde|amostra/i.test(f.resumo) ? 'degustação/brinde' : 'uso e consumo';
+      if (dae && f.valorDevido) { const t = `Mercadoria para ${dest}, não revendida: ST indevida; devido só o DIFAL de ${U.brl(f.valorDevido)}, recolhido no DAEMS ${dae}`; return caber(`${t} (CF art. 150 §7º; LC 87/96 art. 10)`, t); }
+      return `Mercadoria para ${dest}, não revendida: ST indevida${f.valorDevido ? `; devido só o diferencial de alíquotas (${U.brl(f.valorDevido)})` : ''} (CF art. 150 §7º; LC 87/96 art. 10)`;
+    },
+    ST_INSUMO: (f, dae) => {
+      if (dae && f.valorDevido) { const t = `Insumo do preparo de alimentos, não revendido: ST indevida; devida só a Equalização de ${U.brl(f.valorDevido)}, recolhida no DAEMS ${dae}`; return caber(`${t} (CF art. 150 §7º; Dec. 15.055/2018)`, t); }
+      return `Insumo usado no preparo de alimentos, não revendido: ST indevida${f.valorDevido ? `; devida só a Equalização (${U.brl(f.valorDevido)})` : ''} (CF art. 150 §7º; Dec. 15.055/2018)`;
+    },
     ST_SEM_CEST: () => 'NF sem CEST e produto que não corresponde a item do Subanexo I do Anexo III do RICMS/MS: não sujeito à ST (Conv. ICMS 142/2018, cl. 7ª)',
-    ST_FORA_TAB: f => `NCM ${U.fmtNCM(f.ncm)} fora do Subanexo I do Anexo III do RICMS/MS: mercadoria não sujeita à ST (Conv. ICMS 142/2018, cl. 7ª)`,
+    ST_FORA_TAB: (f, dae) => {
+      if (dae && f.valorDevido) { const t = `NCM ${U.fmtNCM(f.ncm)} fora do Subanexo I do RICMS/MS: não sujeito à ST; Equalização de ${U.brl(f.valorDevido)} recolhida no DAEMS ${dae}`; return caber(`${t} (Conv. ICMS 142/2018, cl. 7ª)`, t); }
+      return `NCM ${U.fmtNCM(f.ncm)} fora do Subanexo I do Anexo III do RICMS/MS: mercadoria não sujeita à ST (Conv. ICMS 142/2018, cl. 7ª)`;
+    },
     DUP_ST_EQ: () => 'Mesmo item cobrado na ST e na Equalização; a Equalização não se aplica a mercadoria sujeita à ST (Dec. 15.055/2018, art. 3º, §1º, II, a)',
     DUP_ITEM: () => 'Linha repetida na memória de cálculo: o mesmo item foi cobrado mais de uma vez (CTN, art. 165)',
     DUP_PERIODO: f => `${semPontoFinal(f.resumo)}: mesmo fato gerador cobrado duas vezes (CTN, art. 165)`
   };
   /** Texto curto de um achado: o resumo e a norma principal. */
-  function curto(f) {
-    if (CURTO[f.ruleId]) return CURTO[f.ruleId](f);
+  function curto(f, dae) {
+    if (CURTO[f.ruleId]) return CURTO[f.ruleId](f, dae);
     const cit = (global.RST_LEGAL.citacoes(f.baseLegal || [])[0] || '');
     return `${semPontoFinal(f.resumo)}${cit ? ` (${cit})` : ''}`;
   }
 
-  function camposPedido(fs, valor) {
+  function camposPedido(fs, valor, daems) {
     const ord = fs.slice().sort((a, b) => b.valorRevisar - a.valorRevisar);
     const principal = ord[0];
     const motivoKey = MOTIVO_DA_REGRA[principal.ruleId] || 'OUTROS';
     const descricao = cortar(`${principal.regra}${ord.length > 1 ? ` e mais ${ord.length - 1}` : ''}. Excluir ${U.brl(valor)}`, LIM_DESC);
-    // junta achados inteiros enquanto couberem; só o primeiro pode ser cortado
+    // junta achados inteiros enquanto couberem; só o primeiro pode ser cortado. O texto com o nº do DAEMS vem primeiro.
+    const D = global.RST_DAEMS;
+    const textos = U.uniq(ord.map(f => curto(f, D && daems ? D.numeroDo(daems, f) : '')));
+    textos.sort((a, b) => (/DAEMS/.test(b) ? 1 : 0) - (/DAEMS/.test(a) ? 1 : 0));
     let justificativa = '';
-    U.uniq(ord.map(curto)).forEach((t, i) => {
+    textos.forEach((t, i) => {
       const prox = justificativa ? `${justificativa}; ${t}` : t;
       if (i === 0) justificativa = cortar(prox, LIM_JUST - 1);
       else if (prox.length + 1 <= LIM_JUST) justificativa = prox;
@@ -263,7 +291,7 @@
     return { motivo: MOTIVOS[motivoKey], motivoKey, descricao, justificativa };
   }
 
-  function pedidoEFazenda(model, findings) {
+  function pedidoEFazenda(model, findings, daems) {
     const ativos = findings.filter(f => f.valorRevisar > 0 && !['descartado', 'indeferido'].includes(f.status));
     const cons = consolidar(model, ativos);
     const grupos = U.groupBy(cons, x => `${x.ch.companyId}|${x.ch.referencia}|${x.ch.tipo}`);
@@ -277,17 +305,17 @@
         const daNota = x.findings.filter(f => f.escopo === 'nota');
         if (daNota.some(f => f.integral)) { // motivo da nota inteira (devolução, cancelamento, outro destinatário, ME isenta…)
           const fsN = daNota.filter(f => f.integral);
-          desvincular.push(Object.assign(base, { revisar: ch.valorICMS }, camposPedido(fsN.length ? fsN : x.findings, ch.valorICMS)));
+          desvincular.push(Object.assign(base, { revisar: ch.valorICMS }, camposPedido(fsN.length ? fsN : x.findings, ch.valorICMS, daems)));
           return;
         }
         const porItem = U.groupBy(x.findings.filter(f => f.escopo === 'item'), f => f.itemId);
         const itens = Object.entries(porItem).map(([itemId, ifs]) => {
           const it = model.itemsById.get(itemId) || {};
           const rev = U.round2(Math.min(it.icms || 0, U.sum(ifs, f => f.valorRevisar)));
-          return Object.assign({ ncm: it.ncm || '', descricaoItem: it.descricao || '', valorTotal: it.valorTotal || 0, icms: it.icms || 0, revisar: rev }, camposPedido(ifs, rev));
+          return Object.assign({ ncm: it.ncm || '', descricaoItem: it.descricao || '', valorTotal: it.valorTotal || 0, icms: it.icms || 0, revisar: rev }, camposPedido(ifs, rev, daems));
         }).sort((a, b) => b.revisar - a.revisar);
         // achado da nota sem item (ex.: bases acima do valor da NF): vai como linha da própria nota
-        daNota.forEach(f => itens.push(Object.assign({ ncm: '', descricaoItem: '(nota inteira)', valorTotal: ch.valorNF || 0, icms: ch.valorICMS, revisar: f.valorRevisar }, camposPedido([f], f.valorRevisar))));
+        daNota.forEach(f => itens.push(Object.assign({ ncm: '', descricaoItem: '(nota inteira)', valorTotal: ch.valorNF || 0, icms: ch.valorICMS, revisar: f.valorRevisar }, camposPedido([f], f.valorRevisar, daems))));
         if (itens.length) alterar.push(Object.assign(base, { revisar: U.round2(x.total), itens }));
       });
       return {

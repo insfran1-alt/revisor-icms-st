@@ -72,6 +72,21 @@ O app traz a relação das mercadorias sujeitas à ST em MS — **Subanexo I do 
 - **Atualizar:** baixe o Subanexo I no site da SEFAZ/MS, abra no Word e salve como `.docx`. Depois use *Tabelas e regras → Atualizar com nova versão*.
 - **Ajustes:** a sua tabela de MVA, na mesma tela, prevalece sobre a relação.
 
+## Recolhimentos (DAEMS)
+
+Nos itens revisados, parte do imposto continua devida e é recolhida em DAEMS emitido manualmente. A tela soma esses valores por empresa, referência e imposto:
+
+- **DIFAL:** bens de uso e consumo, brinde ou degustação.
+- **Equalização:** insumos e itens fora da ST.
+
+O que a tela faz:
+
+- **Memória de cálculo:** mostra, item a item, o valor da operação, as alíquotas, o ICMS de origem, a base e o valor devido.
+- **Dados do DAEMS:** guarda o número (formato `01.170.776.181-49`), o valor, o vencimento e a data do pagamento.
+- **Justificativa do 1º pedido no e-Fazenda:** com o número informado, a justificativa passa a citar o DAEMS, dentro dos 199 caracteres. Ex.: "devido só o DIFAL de R$ 209,78, recolhido no DAEMS 01.170.776.181-49".
+- **Requerimento:** traz o quadro "1.2. Valores que continuam devidos e seu recolhimento", o pedido de reconhecimento do recolhimento e um anexo com a memória de cálculo.
+- **Excel:** aba *DAEMS* (resumo e diferença entre o valor do DAEMS e o da memória) e aba *Memória de cálculo*, com as fórmulas.
+
 ## Vendas × ST (Registro de Saídas e Controle do Simples)
 
 Mede o ICMS pago a mais no DAS quando mercadorias com ICMS-ST já recolhido saem com CSOSN 102. A receita delas deveria ser segregada no PGDAS-D como "com substituição tributária" (LC 123/2006, art. 18, § 4º-A, I).
@@ -136,6 +151,7 @@ assets/js/util.js       utilitários (números, datas, CNPJ, NCM…)
 assets/js/pdftext.js    extração de texto dos PDFs (pdf.js)
 assets/js/parsers.js    leitura: prévia, "Dados da Nota", memória ST, cartão CNPJ, XML
 assets/js/vendas.js     Vendas × ST: Registro de Saídas e Controle do Simples (Makro), classificação e Excel
+assets/js/daems.js      Recolhimentos: DIFAL e Equalização devidos nos itens revisados, nº do DAEMS e memória
 assets/js/legal.js      base legal e catálogo de checagens
 assets/js/subanexo.js   leitura e consulta da relação oficial (Subanexo I)
 assets/data/subanexo1-ms.js  relação oficial do Subanexo I (dados)
