@@ -49,7 +49,8 @@
     { id: 'tabelas', nome: 'Tabelas e regras', icon: 'sliders' },
     { id: 'ajuda', nome: 'Como usar', icon: 'help' }
   ];
-  const TIPO_DOC = { previa: 'Relatório de prévia', itens: 'Memória de cálculo', cnpj: 'Cartão CNPJ', nfe: 'XML da NF-e', saidas: 'Registro de Saídas', simples: 'Controle do Simples' };
+  const TIPO_DOC = { previa: 'Relatório de prévia', itens: 'Memória de cálculo', cnpj: 'Cartão CNPJ', nfe: 'XML da NF-e', saidas: 'Registro de Saídas', simples: 'Controle do Simples', entradas: 'SPED de entradas' };
+  const MAKRO = ['saidas', 'simples', 'entradas'];
   const PAGE = 50;
 
   const App = { state: null, model: null, ui: null, sel: new Set(), lastImport: null, reqOpts: null };
@@ -153,7 +154,7 @@
   function renderScope() {
     const comps = [...App.model.companies.values()].sort((a, b) => nomeCurto(a).localeCompare(nomeCurto(b)));
     $('#scope-empresa').innerHTML = opt('', 'Todas as empresas', App.ui.empresa) + comps.map(c => opt(c.id, nomeCurto(c), App.ui.empresa)).join('');
-    const refsVendas = App.state.docs.filter(d => (d.kind === 'saidas' || d.kind === 'simples') && (!App.ui.empresa || (d.link && d.link.companyId === App.ui.empresa))).map(d => (d.link && d.link.referencia) || d.data.referencia);
+    const refsVendas = App.state.docs.filter(d => MAKRO.includes(d.kind) &&(!App.ui.empresa || (d.link && d.link.companyId === App.ui.empresa))).map(d => (d.link && d.link.referencia) || d.data.referencia);
     const refs = U.uniq(App.model.charges.filter(c => !App.ui.empresa || c.companyId === App.ui.empresa).map(c => c.referencia).concat(refsVendas).filter(Boolean)).sort().reverse();
     if (App.ui.ref && !refs.includes(App.ui.ref)) refs.unshift(App.ui.ref);
     $('#scope-ref').innerHTML = opt('', 'Todas as referências', App.ui.ref) + refs.map(r => opt(r, 'Ref. ' + U.refLabel(r), App.ui.ref)).join('');
@@ -305,9 +306,10 @@
     }
     if (d.kind === 'nfe') { nf = 'NF ' + d.data.numero; itens = d.data.itens.length; valor = d.data.valorNF; const nfm = m.nfs.find(x => x.xml && x.xml.id === d.id); vincOk = !!nfm; vinc = nfm ? 'Cobrança' : 'Sem cobrança'; if (nfm) companyId = nfm.companyId; }
     if (d.kind === 'cnpj') { nf = U.fmtCNPJ(d.data.cnpj); vinc = 'Empresa'; }
-    if (d.kind === 'saidas' || d.kind === 'simples') {
+    if (MAKRO.includes(d.kind)) {
       ref = (d.link && d.link.referencia) || d.data.referencia;
       if (d.kind === 'saidas') { itens = d.data.linhas.length; nf = `${d.data.nProdutos} produto(s)`; valor = d.data.total; }
+      else if (d.kind === 'entradas') { itens = d.data.nItens; nf = `${d.data.nNotas} NF de entrada`; valor = d.data.total; }
       else { valor = d.data.receita; nf = `${d.data.notas} NF`; }
       vincOk = !!companyId; vinc = companyId ? 'Empresa' : 'Sem empresa';
     }
@@ -331,7 +333,7 @@
           <div class="ico">${ic('upload')}</div>
           <h3>Arraste e solte os arquivos aqui</h3>
           <div class="muted">ou clique para selecionar — vários de uma vez, de várias empresas</div>
-          <div class="types"><span>Relatório de Prévia (PDF)</span><span>Dados da Nota (Excel ou PDF)</span><span>Memória ST (XLSX/CSV)</span><span>XML da NF-e</span><span>Cartão CNPJ (PDF)</span><span>Registro de Saídas e Controle do Simples (Makro, XLSX)</span></div>
+          <div class="types"><span>Relatório de Prévia (PDF)</span><span>Dados da Nota (Excel ou PDF)</span><span>Memória ST (XLSX/CSV)</span><span>XML da NF-e</span><span>Cartão CNPJ (PDF)</span><span>Registro de Saídas e Controle do Simples (Makro, XLSX)</span><span>SPED Fiscal de entradas (TXT)</span></div>
           <div class="progress hidden" id="imp-progress"><span></span></div>
           <div class="tiny muted" id="imp-status"></div>
         </div>
@@ -351,7 +353,7 @@
       </div>
       <div class="card">
         <div class="card-head"><h3>Documentos importados</h3><span class="pill neutro">${App.state.docs.length}</span>
-          <div class="sp chips">${[['', 'Todos'], ['previa', 'Prévias'], ['itens', 'Memórias'], ['nfe', 'XML'], ['cnpj', 'Cartões CNPJ'], ['saidas', 'Saídas'], ['simples', 'Controle Simples']].map(([k, n]) => `<button type="button" class="chip ${kind === k ? 'on' : ''}" data-act="doc-kind" data-v="${k}">${n}${k ? ` (${(counts[k] || []).length})` : ''}</button>`).join('')}</div></div>
+          <div class="sp chips">${[['', 'Todos'], ['previa', 'Prévias'], ['itens', 'Memórias'], ['nfe', 'XML'], ['cnpj', 'Cartões CNPJ'], ['saidas', 'Saídas'], ['simples', 'Controle Simples'], ['entradas', 'SPED entradas']].map(([k, n]) => `<button type="button" class="chip ${kind === k ? 'on' : ''}" data-act="doc-kind" data-v="${k}">${n}${k ? ` (${(counts[k] || []).length})` : ''}</button>`).join('')}</div></div>
         <div class="table-wrap"><table class="data">
           <thead><tr><th>Arquivo</th><th>Tipo</th><th>Empresa</th><th>Ref.</th><th>NF</th><th class="num">Itens</th><th class="num">ICMS / valor</th><th>Vínculo</th><th>Avisos</th><th></th></tr></thead>
           <tbody>${docs.length ? docs.map(d => {
@@ -364,7 +366,7 @@
               <td class="num">${i.itens === '' ? '' : i.itens}</td><td class="num">${i.valor === null ? '' : U.brl(i.valor)}</td>
               <td>${i.vinc ? `<span class="pill ${i.vincOk ? 'ok' : 'moderada'}">${h(i.vinc)}</span>` : ''}</td>
               <td>${warn ? `<span class="pill moderada" title="${h(d.warnings.join('\n'))}">${warn} aviso(s)</span>` : '<span class="sub">—</span>'}</td>
-              <td class="nowrap">${['itens', 'previa', 'saidas', 'simples'].includes(d.kind) ? `<button class="btn sm ghost" type="button" data-act="edit-link" data-doc="${h(d.id)}" title="Ajustar vínculo">${ic('edit')}</button>` : ''}<button class="btn sm ghost danger" type="button" data-act="rm-doc" data-doc="${h(d.id)}" title="Remover documento">${ic('trash')}</button></td></tr>`;
+              <td class="nowrap">${['itens', 'previa', 'saidas', 'simples', 'entradas'].includes(d.kind) ? `<button class="btn sm ghost" type="button" data-act="edit-link" data-doc="${h(d.id)}" title="Ajustar vínculo">${ic('edit')}</button>` : ''}<button class="btn sm ghost danger" type="button" data-act="rm-doc" data-doc="${h(d.id)}" title="Remover documento">${ic('trash')}</button></td></tr>`;
           }).join('') : '<tr class="empty-row"><td colspan="10">Nenhum documento importado.</td></tr>'}</tbody>
         </table></div>
       </div>
@@ -377,7 +379,7 @@
   const V = () => global.RST_VENDAS;
   const relatoriosVendas = () => App.state.docs.filter(d => d.kind === 'saidas');
   const FILTROS_VENDAS = [['', 'Todos'], ['segregar', 'A segregar como ST'], ['st_conferir', 'Conferir entrada'], ['st_ja', 'Já como ST'], ['naost', 'Não ST']];
-  const passaFiltroVendas = (p, f) => !f || (f === 'segregar' ? ['st_cobrado', 'st_manual', 'st_conferir'].includes(p.sit) : f === 'naost' ? !V().SIT[p.sit].st : p.sit === f);
+  const passaFiltroVendas = (p, f) => !f || (f === 'segregar' ? ['st_cobrado', 'st_retido', 'st_manual', 'st_conferir'].includes(p.sit) : f === 'naost' ? !V().SIT[p.sit].st : p.sit === f);
 
   function listaRelatoriosVendas(docs) {
     const m = App.model;
@@ -395,7 +397,7 @@
   function viewVendas() {
     App.vendasAn = null;
     const docs = relatoriosVendas();
-    const intro = `<div class="muted small">Importe o <b>Registro de Saídas Detalhado</b> e o <b>Controle de Cálculo do Simples Nacional</b> (Excel da Makro) de cada empresa e mês. O app cruza as vendas com as memórias de ICMS-ST e de Equalização já importadas e com o Subanexo I, aponta os produtos que deveriam sair com CSOSN 500 e calcula o ICMS embutido no DAS pago a mais.</div>`;
+    const intro = `<div class="muted small">Importe o <b>Registro de Saídas Detalhado</b> e o <b>Controle de Cálculo do Simples Nacional</b> (Excel da Makro) de cada empresa e mês e, se tiver, o <b>SPED Fiscal</b> (TXT) com as notas de entrada. O app cruza as vendas com as memórias de ICMS-ST e de Equalização já importadas e com o Subanexo I, aponta os produtos que deveriam sair com CSOSN 500 e calcula o ICMS embutido no DAS pago a mais.</div>`;
     if (!docs.length) return `<div class="card empty"><div class="ico">${ic('layers')}</div><h3>Vendas que deveriam ser ST</h3>${intro}<div class="row" style="justify-content:center;margin-top:12px"><button class="btn primary" type="button" data-act="pick-files">${ic('upload')} Importar relatórios</button></div></div>`;
     const cid = App.ui.empresa, ref = App.ui.ref;
     const an = cid && ref ? V().analisar(App.state, App.model, cid, ref) : null;
@@ -413,10 +415,11 @@
           <div class="muted small">ICMS do Simples pago a mais nas vendas de produtos com ST · ${h(nomeCurto(an.company))} · ${h(U.refLabel(an.ref))}</div>
           <div class="big">${U.brl(t.icms)}</div>
           <p class="lead">${U.brl(t.cobrado + t.conferir)} em vendas a segregar como ST (${t.receitaMes ? U.fmt((t.cobrado + t.conferir) / t.receitaMes * 100, 1) : '0'}% da receita de ${U.brl(t.receitaMes)}) · ICMS de ${U.pct(p.fator * 100, 4)} embutido no DAS</p>
-          <div class="legend"><span><i class="dot forte"></i>ST cobrado na entrada ${U.brl(t.cobrado)} → ${U.brl(t.icmsCobrado)}</span><span><i class="dot moderada"></i>Conferir entrada ${U.brl(t.conferir)} → ${U.brl(t.icmsConferir)}</span><span><i class="dot ok"></i>Já emitido como ST ${U.brl(t.jaST)}</span></div>
+          <div class="legend"><span><i class="dot forte"></i>ST cobrado ou retido na entrada ${U.brl(t.cobrado)} → ${U.brl(t.icmsCobrado)}</span><span><i class="dot moderada"></i>Conferir entrada ${U.brl(t.conferir)} → ${U.brl(t.icmsConferir)}</span><span><i class="dot ok"></i>Já emitido como ST ${U.brl(t.jaST)}</span></div>
         </div>
         <div class="stack">
           <div class="callout ${an.docC ? 'ok' : 'warn'}">${an.docC ? `<b>Controle do Simples:</b> receita de ${U.brl(an.docC.data.receita)}${an.docC.data.devolucoes ? `, devoluções ${U.brl(an.docC.data.devolucoes)}` : ''}${Math.abs(an.docC.data.receita - t.receitaSaidas) > 1 ? `. <b>Atenção:</b> difere do Registro de Saídas (${U.brl(t.receitaSaidas)}).` : ' — confere com o Registro de Saídas.'}` : '<b>Controle do Simples não importado:</b> usando a receita do Registro de Saídas.'}</div>
+          ${calloutEntradas(an)}
           <div class="row"><button class="btn primary" type="button" data-act="export-vendas">${ic('download')} Relatório Excel para a empresa</button><button class="btn" type="button" data-go="vendas" data-empresa="" data-ref="">Outros relatórios</button></div>
         </div>
       </div>
@@ -435,6 +438,26 @@
         <div class="card-pad" style="padding-top:0"><input type="search" id="vendas-q" style="width:100%" value="${h(App.ui.vendas.q)}" placeholder="Buscar por produto, código, GTIN ou NCM…" aria-label="Buscar produto"></div>
         <div id="vendas-results"></div>
       </div>
+      ${cardEntradas(an)}
+    </div>`;
+  }
+
+  const cobTxtEnt = n => n.cobST && n.cobEQ ? ['ICMS-ST e Equalização', 'ok'] : n.cobST ? ['ICMS-ST', 'ok'] : n.cobEQ ? ['Equalização', 'ok'] : n.interna ? ['Compra interna', 'neutro'] : ['Não localizada', 'moderada'];
+  function calloutEntradas(an) {
+    const E = an.entradas;
+    if (!E) return `<div class="callout warn"><b>SPED de entradas não importado:</b> importe o SPED Fiscal (EFD ICMS/IPI, TXT) do mês para conferir as notas de entrada, resolver os "conferir" e indicar o CFOP de entrada correto.</div>`;
+    const semCob = E.notas.filter(n => !n.cobST && !n.cobEQ && !n.interna).length;
+    return `<div class="callout ${semCob || E.semNota.length ? 'warn' : 'ok'}"><b>SPED de entradas (${h(E.refs.map(U.refLabel).join(', '))}):</b> ${E.notas.length} nota(s), ${U.brl(U.sum(E.notas, n => n.valor))}${semCob ? ` · ${semCob} interestadual(is) sem cobrança da SEFAZ no app` : ''}${E.semNota.length ? ` · <b>${E.semNota.length} cobrança(s) sem nota escriturada</b>` : ''}. Detalhes no fim da tela.</div>`;
+  }
+  function cardEntradas(an) {
+    const E = an.entradas;
+    if (!E) return '';
+    return `<div class="card">
+      <div class="card-head"><h3>Notas de entrada (SPED)</h3><span class="pill neutro">${E.notas.length}</span><span class="sp muted small">Cruzadas com as cobranças de ICMS-ST e Equalização importadas no app.</span></div>
+      <div class="table-wrap"><table class="data"><thead><tr><th>NF</th><th>Emissão</th><th>Entrada</th><th>Fornecedor</th><th>UF</th><th class="num">Itens</th><th class="num">Valor</th><th>CFOP escriturado</th><th>Cobrança da SEFAZ</th></tr></thead><tbody>
+        ${E.notas.map(n => { const [t, cls] = cobTxtEnt(n); return `<tr><td class="small nowrap">${h(n.nf)}${n.mod === '55' ? '' : `<div class="sub">mod. ${h(n.mod)}</div>`}</td><td class="small nowrap">${h(U.brDate(n.emissao))}</td><td class="small nowrap">${h(U.brDate(n.entrada))}</td><td class="small">${h(n.fornecedor)}<div class="sub">${h(U.fmtCNPJ(n.cnpj))}</div></td><td class="small">${h(n.uf)}</td><td class="num">${n.itens.length}</td><td class="num">${U.brl(n.valor)}</td><td class="small">${h(n.cfops.join(' / '))}</td><td><span class="pill ${cls}">${h(t)}</span></td></tr>`; }).join('')}
+      </tbody></table></div>
+      ${E.semNota.length ? `<div class="card-pad"><div class="callout warn"><b>Cobranças da SEFAZ sem nota de entrada escriturada no SPED:</b> ${E.semNota.map(c => `NF ${h(c.numero)} (${c.tipo === 'EQ' ? 'Equalização' : 'ICMS-ST'}${c.ufRemetente ? ', ' + h(c.ufRemetente) : ''}${+c.valorICMS ? ', ' + U.brl(+c.valorICMS) : ''})`).join('; ')}. Peça à empresa para conferir se essas notas foram lançadas no ERP.</div></div>` : ''}
     </div>`;
   }
 
@@ -446,9 +469,9 @@
     const lim = 300;
     box.innerHTML = `<div class="table-wrap"><table class="data"><thead><tr><th>Situação</th><th>Produto</th><th>NCM</th><th>CEST</th><th>CSOSN</th><th class="num">Receita</th><th class="num">ICMS a mais</th><th>Ajuste</th></tr></thead><tbody>
       ${rows.slice(0, lim).map(p => {
-        const s = S[p.sit], icms = (p.sit === 'st_cobrado' || p.sit === 'st_manual' || p.sit === 'st_conferir') ? U.round2((p.liq - p.liqJa) * an.param.fator) : 0;
+        const s = S[p.sit], icms = (V().FORTES.includes(p.sit) || p.sit === 'st_conferir') ? U.round2((p.liq - p.liqJa) * an.param.fator) : 0;
         return `<tr><td><span class="pill ${s.cls}">${h(s.nome)}</span>${p.notas.length ? `<div class="sub">NF ${h(p.notas.slice(0, 6).join(', '))}${p.notas.length > 6 ? '…' : ''}</div>` : ''}</td>
-          <td class="desc"><b class="small">${h(p.nome)}</b><div class="sub">Cód. ${h(p.cod)}${U.digits(p.ean).length >= 8 ? ' · GTIN ' + h(p.ean) : ''} · ${p.nNFs} NF</div><div class="sub">${h(p.obs)}</div></td>
+          <td class="desc"><b class="small">${h(p.nome)}</b><div class="sub">Cód. ${h(p.cod)}${U.digits(p.ean).length >= 8 ? ' · GTIN ' + h(p.ean) : ''} · ${p.nNFs} NF</div>${p.entrada ? `<div class="sub">Entrada: NF ${h(p.entrada.txt)} · CFOP ${h(p.entrada.cfops.join('/'))}</div>` : ''}<div class="sub">${h(p.obs)}</div></td>
           <td class="small nowrap">${h(U.fmtNCM(p.ncm))}</td>
           <td class="small"><input type="text" class="sm" style="width:92px" data-vcest="${h(p.cod)}" value="${h(U.fmtCEST(p.cestAjuste))}" placeholder="${h(U.fmtCEST(p.cest) || (s.st ? 'conferir' : ''))}" title="${h(p.descCest || (p.cands.length ? p.cands.map(e => U.fmtCEST(e.cest) + ' ' + e.desc).slice(0, 6).join('\n') : ''))}" aria-label="CEST"></td>
           <td class="small nowrap">${h(p.csts.join(' / '))}${s.st && p.sit !== 'st_ja' ? '<div class="sub">→ 500</div>' : ''}</td>
@@ -595,6 +618,7 @@
   /** Empresa dos relatórios da Makro: código do escritório, razão social/fantasia no nome do arquivo ou a empresa selecionada no escopo. */
   function companyForMakro(dt) {
     const cs = App.state.companies;
+    if (dt.cnpj) { const c = cs.find(x => U.digits(x.cnpj) === dt.cnpj); if (c) return c; }
     if (dt.codEscritorio) { const c = cs.find(x => x.codEscritorio && x.codEscritorio === dt.codEscritorio); if (c) return c; }
     const n = U.normKey(dt.empresaNome);
     if (n) {
@@ -615,10 +639,11 @@
       const old = App.state.docs.filter(x => x.kind === 'previa' && x.link && x.link.companyId === c.id && x.data.referencia === doc.data.referencia && x.data.tributoCodigo === doc.data.tributoCodigo);
       if (old.length) { App.state.docs = App.state.docs.filter(x => !old.includes(x)); res.subst.push(doc.fileName); }
     }
-    if (doc.kind === 'saidas' || doc.kind === 'simples') {
+    if (MAKRO.includes(doc.kind)) {
       const c = companyForMakro(doc.data);
       doc.link = { companyId: c ? c.id : '', referencia: doc.data.referencia || '' };
-      if (!c) doc.warnings = (doc.warnings || []).concat('Empresa não identificada pelo nome do arquivo: defina-a no vínculo do documento (ícone de lápis).');
+      if (!c) doc.warnings = (doc.warnings || []).concat(doc.kind === 'entradas' ? `Empresa do CNPJ ${U.fmtCNPJ(doc.data.cnpj)} não cadastrada: importe o cartão CNPJ ou defina-a no vínculo do documento (ícone de lápis).` : 'Empresa não identificada pelo nome do arquivo: defina-a no vínculo do documento (ícone de lápis).');
+      else if (doc.kind === 'entradas' && doc.data.cnpj && U.digits(c.cnpj) && U.digits(c.cnpj) !== doc.data.cnpj) doc.warnings = (doc.warnings || []).concat(`O SPED é do CNPJ ${U.fmtCNPJ(doc.data.cnpj)}, diferente da empresa vinculada.`);
       else {
         if (doc.data.codEscritorio && !c.codEscritorio) c.codEscritorio = doc.data.codEscritorio;
         const old = App.state.docs.filter(x => x.kind === doc.kind && x.link && x.link.companyId === c.id && (x.link.referencia || x.data.referencia) === doc.link.referencia);
@@ -690,12 +715,12 @@
     const ch = d.kind === 'itens' ? m.chargesById.get(m.docCharge.get(d.id)) : null;
     const lk = d.link || {};
     const body = d.kind === 'previa' ? `
-      <label class="field"><span>Empresa</span><select id="lk-emp">${comps.map(c => opt(c.id, nomeCurto(c), lk.companyId)).join('')}</select></label>` : (d.kind === 'saidas' || d.kind === 'simples') ? `
+      <label class="field"><span>Empresa</span><select id="lk-emp">${comps.map(c => opt(c.id, nomeCurto(c), lk.companyId)).join('')}</select></label>` : MAKRO.includes(d.kind) ? `
       <div class="grid g2">
         <label class="field"><span>Empresa</span><select id="lk-emp">${opt('', '—', lk.companyId || '')}${comps.map(c => opt(c.id, nomeCurto(c), lk.companyId)).join('')}</select></label>
         <label class="field"><span>Referência</span><input type="month" id="lk-ref" value="${h(lk.referencia || d.data.referencia || '')}"></label>
       </div>
-      <div class="small muted">Nome no arquivo: ${h(d.data.empresaNome || '—')}${d.data.codEscritorio ? ` · código ${h(d.data.codEscritorio)} no sistema contábil` : ''}</div>` : `
+      <div class="small muted">Nome no arquivo: ${h(d.data.empresaNome || '—')}${d.data.cnpj ? ` · CNPJ ${h(U.fmtCNPJ(d.data.cnpj))}` : ''}${d.data.codEscritorio ? ` · código ${h(d.data.codEscritorio)} no sistema contábil` : ''}</div>` : `
       <div class="callout">Normalmente o vínculo é automático pelo número da NF e pelo relatório de prévia. Ajuste só se o documento ficou sem prévia ou em outra empresa.</div>
       <div class="grid g2">
         <label class="field"><span>Empresa</span><select id="lk-emp">${opt('', 'Automático', '')}${comps.map(c => opt(c.id, nomeCurto(c), lk.companyId)).join('')}</select></label>
@@ -713,8 +738,8 @@
     const d = App.state.docs.find(x => x.id === docId);
     if (!d) return;
     if (d.kind === 'previa') d.link = { companyId: $('#lk-emp').value };
-    else if (d.kind === 'saidas' || d.kind === 'simples') {
-      d.link = { companyId: $('#lk-emp').value, referencia: U.refKey($('#lk-ref').value) || d.data.referencia };
+    else if (MAKRO.includes(d.kind)) {
+      d.link ={ companyId: $('#lk-emp').value, referencia: U.refKey($('#lk-ref').value) || d.data.referencia };
       const c = App.state.companies.find(x => x.id === d.link.companyId);
       if (c && d.data.codEscritorio && !c.codEscritorio) c.codEscritorio = d.data.codEscritorio;
     }
@@ -1742,6 +1767,7 @@
         <p>Itens revisados de uso e consumo, brinde ou degustação continuam com <b>DIFAL</b> devido, e insumos e itens fora da ST continuam com <b>Equalização</b>. A tela <b>Recolhimentos (DAEMS)</b> soma esses valores por empresa, referência e imposto e mostra a memória de cálculo. Emita o DAEMS e informe o número (ex.: 01.170.776.181-49): ele passa a constar da justificativa do 1º pedido no e-Fazenda e do requerimento, com a memória anexa. O botão Excel gera a memória de cálculo para apresentar quando a SEFAZ pedir.</p>
         <h3>Vendas × ST</h3>
         <p>Importe o <b>Registro de Saídas Detalhado</b> e o <b>Controle de Cálculo do Simples Nacional</b> (Excel do sistema contábil Makro) de cada empresa e mês. A empresa é reconhecida pelo nome do arquivo (ex.: "575 - RAZÃO SOCIAL - RegSaidasDetalhado 10 2026"). Na tela <b>Vendas × ST</b>, o app cruza cada produto vendido com as memórias de ICMS-ST e de Equalização da empresa e com o Subanexo I: ST cobrado na entrada, a conferir, já emitido como ST, Equalização, preparado na loja ou fora da ST. Ajuste a situação ou o CEST de cada produto quando precisar. A alíquota do DAS vem do Anexo I pela RBT12 (proporcional no início de atividade); confira com o extrato do PGDAS-D. O Excel traz o resumo do ICMS pago a mais, o cadastro para o ERP (CEST, CSOSN 500, CFOP 5405) e as vendas nota a nota.</p>
+        <p>Importe também o <b>SPED Fiscal</b> (EFD ICMS/IPI, arquivo TXT) do mês: o app lê as notas de entrada, reconhece a empresa pelo CNPJ e cruza cada nota com as cobranças da SEFAZ. Os produtos "a conferir" passam a mostrar a NF de entrada; compras dentro do estado ou com ICMS-ST destacado viram "ICMS-ST retido antes". O Excel ganha o CFOP de entrada correto (2403/1403) no cadastro e a aba "Entradas (SPED)", com as cobranças da SEFAZ que não têm nota escriturada.</p>
         <div class="callout warn">Ferramenta de apoio. Os textos de fundamentação são modelos: confira a redação vigente das normas, as MVAs do Subanexo I do RICMS/MS e os documentos antes de protocolar.</div>
       </div>
       <div class="card">

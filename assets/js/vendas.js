@@ -165,6 +165,97 @@
   }
 
   /* ============================================================
+   * SPED Fiscal (EFD ICMS/IPI): notas de entrada
+   * ============================================================ */
+  const UF_IBGE = { 11: 'RO', 12: 'AC', 13: 'AM', 14: 'RR', 15: 'PA', 16: 'AP', 17: 'TO', 21: 'MA', 22: 'PI', 23: 'CE', 24: 'RN', 25: 'PB', 26: 'PE', 27: 'AL', 28: 'SE', 29: 'BA', 31: 'MG', 32: 'ES', 33: 'RJ', 35: 'SP', 41: 'PR', 42: 'SC', 43: 'RS', 50: 'MS', 51: 'MT', 52: 'GO', 53: 'DF' };
+  const dataEFD = s => { const d = U.digits(s); return d.length === 8 ? `${d.slice(4)}-${d.slice(2, 4)}-${d.slice(0, 2)}` : ''; };
+  const ehEFD = text => /^﻿?\|0000\|/.test(String(text || '').slice(0, 20));
+
+  /** Lê o arquivo do SPED Fiscal e guarda só as notas de entrada (C100 com IND_OPER = 0) e seus itens (C170). */
+  function lerEFD(text, fileName) {
+    const prods = {}, parts = {}, notas = [];
+    let cab = null, nota = null;
+    String(text || '').split(/\r?\n/).forEach(ln => {
+      const p = ln.replace(/^﻿/, '').split('|');
+      const reg = p[1];
+      if (!reg) return;
+      if (reg !== 'C100' && !/^C1\d\d$/.test(reg)) nota = null;
+      if (reg === '0000') cab = { ini: dataEFD(p[4]), fim: dataEFD(p[5]), nome: String(p[6] || '').trim(), cnpj: U.digits(p[7]), uf: String(p[9] || '').trim(), ie: U.digits(p[10]) };
+      else if (reg === '0150') parts[p[2]] = { nome: String(p[3] || '').trim(), cnpj: U.digits(p[5]) || U.digits(p[6]), ie: U.digits(p[7]), uf: UF_IBGE[String(p[8] || '').slice(0, 2)] || '' };
+      else if (reg === '0200') prods[p[2]] = { nome: String(p[3] || '').trim(), gtin: U.digits(p[4]), ncm: U.digits(p[8]), cest: U.digits(p[13]) };
+      else if (reg === 'C100') {
+        nota = null;
+        if (p[2] !== '0' || ['02', '03', '04', '05'].includes(p[6])) return;
+        nota = { nf: String(+U.digits(p[8]) || p[8]), serie: String(p[7] || '').trim(), mod: p[5], part: p[4], chave: U.digits(p[9]), emissao: dataEFD(p[10]), entrada: dataEFD(p[11]), valor: num(p[12]), cfops: [], itens: [] };
+        notas.push(nota);
+      } else if (reg === 'C170' && nota) {
+        // [nº item, código, descrição complementar, qtd, valor, desconto, CST/CSOSN, CFOP, ICMS-ST destacado]
+        nota.itens.push([+p[2] || nota.itens.length + 1, String(p[3] || '').trim(), String(p[4] || '').trim(), num(p[5]), num(p[7]), num(p[8]), U.digits(p[10]), U.digits(p[11]), num(p[18])]);
+      } else if (reg === 'C190' && nota) {
+        const cf = U.digits(p[3]);
+        if (cf && !nota.cfops.includes(cf)) nota.cfops.push(cf);
+      }
+    });
+    if (!cab) return null;
+    const warnings = [];
+    if (!notas.length) warnings.push('O SPED não tem notas de entrada (C100 com indicador de entrada).');
+    const usados = new Set(), partsUsadas = new Set();
+    notas.forEach(n => { partsUsadas.add(n.part); n.itens.forEach(i => usados.add(i[1])); if (!n.itens.length) warnings.push(`NF ${n.nf}: escriturada sem itens (C170); só os totais por CFOP.`); });
+    const produtos = {}, participantes = {};
+    usados.forEach(c => { if (prods[c]) produtos[c] = prods[c]; });
+    partsUsadas.forEach(c => { if (parts[c]) participantes[c] = parts[c]; });
+    return {
+      kind: 'entradas',
+      data: {
+        formato: 'efd-icms-ipi', empresaNome: cab.nome, cnpj: cab.cnpj, ie: cab.ie, uf: cab.uf, referencia: cab.ini.slice(0, 7), periodo: { ini: cab.ini, fim: cab.fim },
+        participantes, produtos, notas, nNotas: notas.length, nItens: U.sum(notas, n => n.itens.length), total: U.round2(U.sum(notas, n => n.valor))
+      },
+      warnings: warnings.slice(0, 6)
+    };
+  }
+
+  /** CFOP de entrada para mercadoria com ICMS-ST já retido/cobrado. */
+  const cfopEntST = cf => ({ 1102: '1403', 2102: '2403', 1101: '1401', 2101: '2401', 1403: '1403', 2403: '2403', 1401: '1401', 2401: '2401' }[cf] || '');
+
+  /** Notas de entrada (SPEDs importados até a referência) cruzadas com as cobranças da SEFAZ. */
+  function entradasDaEmpresa(state, model, company, ref) {
+    const cid = company.id;
+    const porRef = {};
+    state.docs.filter(d => d.kind === 'entradas' && d.link && d.link.companyId === cid && (d.link.referencia || d.data.referencia) <= ref)
+      .sort((a, b) => String(b.importedAt).localeCompare(String(a.importedAt)))
+      .forEach(d => { const r = d.link.referencia || d.data.referencia; if (!porRef[r]) porRef[r] = d; });
+    const docs = Object.values(porRef);
+    if (!docs.length) return null;
+    const charges = model.charges.filter(c => c.companyId === cid);
+    const cobDa = (nf, cnpj) => charges.filter(c => String(+c.numero) === String(+nf) && (!(U.digits(c.cnpjRemetente).length === 14 && cnpj.length === 14) || U.digits(c.cnpjRemetente) === cnpj));
+    const ufEmp = company.uf || '';
+    const notas = [], porGtin = new Map(), porNome = new Map();
+    const add = (map, k, e) => { if (!k) return; const l = map.get(k); if (l) l.push(e); else map.set(k, [e]); };
+    docs.forEach(d => {
+      const r = d.link.referencia || d.data.referencia;
+      d.data.notas.forEach(n => {
+        const pt = d.data.participantes[n.part] || {};
+        const cob = cobDa(n.nf, pt.cnpj || '');
+        const N = Object.assign({}, n, { ref: r, fornecedor: pt.nome || '', cnpj: pt.cnpj || '', uf: pt.uf || '', interna: !!pt.uf && pt.uf === (d.data.uf || ufEmp), cobST: cob.some(c => c.tipo === 'ST'), cobEQ: cob.some(c => c.tipo === 'EQ') });
+        notas.push(N);
+        n.itens.forEach(it => {
+          const pr = d.data.produtos[it[1]] || { nome: it[2], gtin: '', ncm: '', cest: '' };
+          const e = { nota: N, item: it, prod: pr };
+          if (temGtin(pr.gtin)) add(porGtin, pr.gtin.replace(/^0+/, ''), e);
+          add(porNome, U.normKey(pr.nome || it[2]), e);
+        });
+      });
+    });
+    notas.sort((a, b) => String(a.entrada || a.emissao).localeCompare(String(b.entrada || b.emissao)) || (+a.nf - +b.nf));
+    const refs = U.uniq(docs.map(d => d.link.referencia || d.data.referencia)).sort();
+    const nfs = new Set(notas.map(n => String(+n.nf)));
+    const vistos = new Set();
+    const semNota = charges.filter(c => refs.includes(c.referencia) && !nfs.has(String(+c.numero)) && !vistos.has(c.tipo + c.numero) && vistos.add(c.tipo + c.numero))
+      .sort((a, b) => a.tipo.localeCompare(b.tipo) || (+a.numero - +b.numero));
+    return { docs, refs, notas, porGtin, porNome, semNota };
+  }
+
+  /* ============================================================
    * Simples Nacional — Anexo I (comércio)
    * ============================================================ */
   // [limite da faixa, alíquota nominal, parcela a deduzir, % do ICMS na partilha]
@@ -212,6 +303,7 @@
    * ============================================================ */
   const SIT = {
     st_cobrado: { nome: 'ST - ICMS-ST cobrado na entrada', st: true, cls: 'forte' },
+    st_retido: { nome: 'ST - ICMS-ST retido antes (NF de entrada)', st: true, cls: 'forte' },
     st_conferir: { nome: 'ST - conferir a NF de entrada', st: true, cls: 'moderada' },
     st_manual: { nome: 'ST - definido manualmente', st: true, cls: 'forte' },
     st_ja: { nome: 'Já vendido como ST (CSOSN 500 / CST 60)', st: true, cls: 'ok' },
@@ -221,6 +313,7 @@
     nao: { nome: 'Não ST - fora do Subanexo I', st: false, cls: 'neutro' },
     nao_manual: { nome: 'Não ST - definido manualmente', st: false, cls: 'neutro' }
   };
+  const FORTES = ['st_cobrado', 'st_retido', 'st_manual'];
   const AJUSTES = [['', 'Automático'], ['st', 'É ST'], ['prep', 'Preparado na loja (não ST)'], ['nao', 'Não é ST']];
   const PREP_NCM = ['2202', '2106', '1901', '2101', '0403', '2105'];
   // palavras comuns que não ajudam a escolher o CEST
@@ -266,6 +359,9 @@
     const alim = cnaesDe(company).some(c => c.startsWith('56'));
     const ajustes = ((state.vendas || {}).ajustes || {})[companyId] || {};
     const sd = docS.data;
+    const E = entradasDaEmpresa(state, model, company, ref);
+    const nomeForn = s => String(s || '').replace(/[^\p{L}\p{N}& ]+/gu, ' ').trim().split(/\s+/).slice(0, 3).join(' ');
+    const nfsTxt = list => { const u = U.uniq(list.map(e => `${e.nota.nf}${e.nota.fornecedor ? ` (${nomeForn(e.nota.fornecedor)}${e.nota.uf ? '/' + e.nota.uf : ''})` : ''}`)); return u.slice(0, 4).join(', ') + (u.length > 4 ? '…' : ''); };
 
     // totais por produto
     const porCod = {};
@@ -308,6 +404,33 @@
       } else {
         obs = pr.ncm ? 'NCM fora da relação do Subanexo I.' : 'Produto sem NCM no relatório.';
       }
+      // entradas do SPED: resolve os "conferir" e mostra de onde veio o produto
+      const ents = E ? ((temGtin(gt) && E.porGtin.get(gt.replace(/^0+/, ''))) || E.porNome.get(U.normKey(pr.nome)) || []) : [];
+      if (E && sit === 'st_conferir') {
+        const retido = ents.filter(e => e.item[8] > 0);
+        const internas = ents.filter(e => e.nota.interna);
+        const cobST = ents.filter(e => e.nota.cobST);
+        const cobEQ = ents.filter(e => e.nota.cobEQ);
+        if (retido.length) {
+          sit = 'st_retido'; notas = U.uniq(retido.map(e => e.nota.nf));
+          obs = `ICMS-ST destacado pelo fornecedor na NF de entrada ${nfsTxt(retido)}.`;
+        } else if (cobST.length) {
+          obs = `A NF de entrada ${nfsTxt(cobST)} tem cobrança de ICMS-ST no app, mas a memória importada não traz este produto. Confira se o item foi cobrado e importe a memória completa.`;
+        } else if (internas.length) {
+          sit = 'st_retido'; notas = U.uniq(internas.map(e => e.nota.nf));
+          obs = `Comprado dentro do estado, na NF ${nfsTxt(internas)}: o ICMS-ST já foi retido ou recolhido antes na cadeia. Confira na NF se o fornecedor é varejista ou se reteve o imposto.`;
+        } else if (ents.length) {
+          obs = `Entrou na NF ${nfsTxt(ents)}, mas essa nota não tem cobrança de ICMS-ST importada no app${cobEQ.length ? ' (só de Equalização)' : ''}. Confira no portal da SEFAZ se o ICMS-ST foi cobrado e importe a memória.`;
+        } else {
+          obs += ' Não há entrada deste produto nos SPEDs importados.';
+        }
+      }
+      const entrada = ents.length ? {
+        nfs: U.uniq(ents.map(e => e.nota.nf)).sort((a, b) => +a - +b),
+        fornecedores: U.uniq(ents.map(e => `${e.nota.fornecedor}${e.nota.uf ? '/' + e.nota.uf : ''}`)),
+        cfops: U.uniq(ents.map(e => e.item[7]).filter(Boolean)).sort(),
+        txt: nfsTxt(ents)
+      } : null;
       if (aj.sit === 'st') { sit = 'st_manual'; obs = 'Definido como ST pelo usuário. ' + obs; }
       else if (aj.sit === 'prep') { sit = 'prep'; obs = 'Definido pelo usuário como preparado na loja.'; }
       else if (aj.sit === 'nao') { sit = 'nao_manual'; obs = 'Definido pelo usuário como não sujeito à ST. ' + obs; }
@@ -318,7 +441,7 @@
         cod, nome: pr.nome, ean: pr.ean, tipo: pr.tipo, ncm: pr.ncm, cest, descCest, sit, ajuste: aj.sit || '', cestAjuste: aj.cest || '',
         csts: [...t.csts].sort(), cfops: [...t.cfops].sort(), nNFs: t.nfs.size,
         qtd: U.round2(t.qtd * 1000) / 1000, bruto: U.round2(t.bruto), desc: U.round2(t.desc), liq: U.round2(t.liq), liqJa: U.round2(t.liqJa),
-        notas, obs, cands: ofic.especificos.length ? ofic.especificos : ofic.cands
+        notas, obs, entrada, cands: ofic.especificos.length ? ofic.especificos : ofic.cands
       };
     });
     const ordem = Object.keys(SIT);
@@ -336,17 +459,47 @@
     const fator = aliq * pIcms;
 
     const soma = f => U.round2(U.sum(produtos.filter(f), p => p.liq - p.liqJa));
+    const forte = p => FORTES.includes(p.sit);
     const tot = {
       receitaMes, receitaSaidas: sd.total,
-      cobrado: soma(p => p.sit === 'st_cobrado' || p.sit === 'st_manual'),
+      cobrado: soma(forte),
       conferir: soma(p => p.sit === 'st_conferir'),
       jaST: U.round2(U.sum(produtos, p => p.liqJa)),
       naoST: U.round2(U.sum(produtos.filter(p => !SIT[p.sit].st), p => p.liq))
     };
-    tot.icmsCobrado = U.round2(U.sum(produtos.filter(p => p.sit === 'st_cobrado' || p.sit === 'st_manual'), p => U.round2((p.liq - p.liqJa) * fator)));
+    tot.icmsCobrado = U.round2(U.sum(produtos.filter(forte), p => U.round2((p.liq - p.liqJa) * fator)));
     tot.icmsConferir = U.round2(U.sum(produtos.filter(p => p.sit === 'st_conferir'), p => U.round2((p.liq - p.liqJa) * fator)));
     tot.icms = U.round2(tot.icmsCobrado + tot.icmsConferir);
-    return { company, ref, docS, docC, produtos, tot, param: { rbt12, sug, calc, aliq, pIcms, fator, manual: { rbt12: par.rbt12, aliq: par.aliq, pIcms: par.pIcms } }, alim };
+
+    // itens das notas de entrada com a situação do produto (para a aba do Excel e a tela)
+    let entradas = null;
+    if (E) {
+      const pG = new Map(), pN = new Map();
+      produtos.forEach(p => {
+        const g = U.digits(p.ean).length >= 8 ? U.digits(p.ean) : (/^\d{8,14}$/.test(p.cod) ? p.cod : '');
+        if (temGtin(g) && !pG.has(g.replace(/^0+/, ''))) pG.set(g.replace(/^0+/, ''), p);
+        const k = U.normKey(p.nome); if (k && !pN.has(k)) pN.set(k, p);
+      });
+      const itens = [];
+      E.notas.forEach(n => n.itens.forEach(it => {
+        const d = E.docs.find(x => (x.link.referencia || x.data.referencia) === n.ref);
+        const pr = (d && d.data.produtos[it[1]]) || { nome: it[2], gtin: '', ncm: '', cest: '' };
+        const gk = temGtin(pr.gtin) ? pr.gtin.replace(/^0+/, '') : '';
+        const pv = (gk && pG.get(gk)) || pN.get(U.normKey(pr.nome || it[2])) || null;
+        let situacao, st, talvez = false;
+        if (pv) { situacao = SIT[pv.sit].nome; st = SIT[pv.sit].st; talvez = pv.sit === 'st_conferir'; }
+        else {
+          const k = (gk && kn.porGtin.get(gk)) || kn.porNome.get(U.normKey(pr.nome || it[2])) || null;
+          if (k && k.ST.length) { situacao = 'Não vendido no mês - ICMS-ST cobrado na entrada'; st = true; }
+          else if (k && k.contest.length) { situacao = 'Não vendido no mês - cobrança de ST contestada'; st = false; }
+          else if (k && k.EQ.length) { situacao = 'Não vendido no mês - Equalização'; st = false; }
+          else { situacao = 'Não vendido no mês'; st = false; }
+        }
+        itens.push({ nota: n, item: it, prod: pr, situacao, st, cfopCorreto: st ? (cfopEntST(it[7]) || (n.interna ? '1403' : '2403')) + (talvez ? ' (se confirmado o ST)' : '') : '' });
+      }));
+      entradas = { refs: E.refs, notas: E.notas, semNota: E.semNota, itens, docs: E.docs };
+    }
+    return { company, ref, docS, docC, produtos, tot, entradas, param: { rbt12, sug, calc, aliq, pIcms, fator, manual: { rbt12: par.rbt12, aliq: par.aliq, pIcms: par.pIcms } }, alim };
   }
 
   /* ============================================================
@@ -365,20 +518,55 @@
     const L = SIT;
 
     // --- Cadastro ERP ---
-    const hCad = ['Situação', 'Código', 'Produto', 'EAN/GTIN', 'NCM no ERP', 'CEST a informar', 'Descrição do CEST (Subanexo I)', 'CST/CSOSN emitido', 'CSOSN correto', 'CFOP emitido', 'CFOP correto', 'Qtd vendida', 'Receita líquida (R$)', 'Receita já emitida como ST (R$)', 'ICMS do DAS pago a mais (R$)', 'NFs de entrada com ICMS-ST', 'Observação'];
+    const hCad = ['Situação', 'Código', 'Produto', 'EAN/GTIN', 'NCM no ERP', 'CEST a informar', 'Descrição do CEST (Subanexo I)', 'CST/CSOSN emitido', 'CSOSN correto', 'CFOP emitido', 'CFOP correto', 'Qtd vendida', 'Receita líquida (R$)', 'Receita já emitida como ST (R$)', 'ICMS do DAS pago a mais (R$)', 'NFs de entrada com ICMS-ST', 'NFs de entrada no SPED', 'Fornecedor/UF', 'CFOP de entrada escriturado', 'CFOP de entrada correto', 'Observação'];
     const aCad = [hCad.map(v => cell(v))];
+    const temEnt = !!an.entradas;
     prods.forEach((p, i) => {
-      const r = i + 2, st = L[p.sit].st;
+      const r = i + 2, st = L[p.sit].st, e = p.entrada;
+      const cfEnt = e ? e.cfops : [];
       aCad.push([cell(L[p.sit].nome), cell(p.cod), cell(p.nome), cell(p.ean), cell(U.fmtNCM(p.ncm)), cell(U.fmtCEST(p.cest) || (st ? 'conferir' : '')), cell(p.descCest),
         cell(p.csts.join(' / ')), cell(st ? U.uniq(p.csts.map(csosnST)).join(' / ') + ' (CSOSN 500)' : 'sem alteração'), cell(p.cfops.join(' / ')), cell(st ? U.uniq(p.cfops.map(cfopST)).join(' / ') : 'sem alteração'),
-        cell(p.qtd, '#,##0.###'), cell(p.liq, M), cell(p.liqJa, M), fml(`IF(LEFT(A${r},2)="ST",ROUND((M${r}-N${r})*Resumo!$C$18,2),0)`, M), cell(p.notas.join(', ')), cell(p.obs)]);
+        cell(p.qtd, '#,##0.###'), cell(p.liq, M), cell(p.liqJa, M), fml(`IF(LEFT(A${r},2)="ST",ROUND((M${r}-N${r})*Resumo!$C$18,2),0)`, M), cell(p.notas.join(', ')),
+        cell(e ? e.nfs.join(', ') : (temEnt ? 'sem entrada no SPED' : '')), cell(e ? e.fornecedores.join('; ') : ''), cell(cfEnt.join(' / ')),
+        cell(e ? (st ? U.uniq(cfEnt.map(c => cfopEntST(c) || c)).join(' / ') + (p.sit === 'st_conferir' ? ' (se confirmado o ST)' : '') : 'sem alteração') : ''), cell(p.obs)]);
     });
     const lc = prods.length + 1;
-    aCad.push([cell('TOTAL'), ...Array(11).fill(cell('')), fml(`SUBTOTAL(9,M2:M${lc})`, M), fml(`SUBTOTAL(9,N2:N${lc})`, M), fml(`SUBTOTAL(9,O2:O${lc})`, M), cell(''), cell('')]);
+    aCad.push([cell('TOTAL'), ...Array(11).fill(cell('')), fml(`SUBTOTAL(9,M2:M${lc})`, M), fml(`SUBTOTAL(9,N2:N${lc})`, M), fml(`SUBTOTAL(9,O2:O${lc})`, M), ...Array(6).fill(cell(''))]);
     const wsCad = X.utils.aoa_to_sheet([[]]);
     X.utils.sheet_add_aoa(wsCad, aCad, { origin: 'A1' });
-    wsCad['!cols'] = [34, 15, 46, 16, 11, 13, 40, 12, 22, 10, 12, 10, 14, 14, 15, 20, 80].map(w => ({ wch: w }));
-    wsCad['!autofilter'] = { ref: `A1:Q${lc}` };
+    wsCad['!cols'] = [34, 15, 46, 16, 11, 13, 40, 12, 22, 10, 12, 10, 14, 14, 15, 20, 20, 30, 12, 12, 80].map(w => ({ wch: w }));
+    wsCad['!autofilter'] = { ref: `A1:U${lc}` };
+
+    // --- Entradas (SPED) ---
+    let wsE = null;
+    if (temEnt) {
+      const E = an.entradas;
+      const hE = ['NF', 'Série', 'Modelo', 'Emissão', 'Entrada', 'Fornecedor', 'CNPJ', 'UF', 'Chave de acesso', 'Item', 'Código no ERP', 'Produto', 'EAN/GTIN', 'NCM', 'Qtd', 'Valor (R$)', 'ICMS-ST destacado (R$)', 'CST/CSOSN escriturado', 'CFOP escriturado', 'CFOP correto', 'Situação do produto', 'Cobrança da SEFAZ na NF'];
+      const aE = [hE.map(v => cell(v))];
+      const dtc = iso => iso ? { t: 'd', v: new Date(iso + 'T12:00:00'), z: 'dd/mm/yyyy' } : cell('');
+      const cobTxt = n => n.cobST && n.cobEQ ? 'ICMS-ST e Equalização' : n.cobST ? 'ICMS-ST' : n.cobEQ ? 'Equalização' : n.interna ? 'Compra interna (sem cobrança)' : 'Não localizada no app';
+      E.itens.forEach(x => {
+        const n = x.nota, it = x.item;
+        aE.push([cell(+n.nf || n.nf), cell(n.serie), cell(n.mod), dtc(n.emissao), dtc(n.entrada), cell(n.fornecedor), cell(U.fmtCNPJ(n.cnpj)), cell(n.uf), cell(n.chave), cell(it[0]), cell(it[1]), cell(x.prod.nome || it[2]), cell(x.prod.gtin), cell(U.fmtNCM(x.prod.ncm)),
+          cell(it[3], '#,##0.###'), cell(it[4], M), cell(it[8], M), cell(it[6]), cell(it[7]), cell(x.cfopCorreto || 'sem alteração'), cell(x.situacao), cell(cobTxt(n))]);
+      });
+      const le = E.itens.length + 1;
+      aE.push([cell('TOTAL'), ...Array(13).fill(cell('')), fml(`SUBTOTAL(9,O2:O${le})`, '#,##0.###'), fml(`SUBTOTAL(9,P2:P${le})`, M), fml(`SUBTOTAL(9,Q2:Q${le})`, M)]);
+      const semItens = E.notas.filter(n => !n.itens.length);
+      if (semItens.length) {
+        aE.push([], [cell('Notas escrituradas sem itens (só totais por CFOP)')], [cell('NF'), cell('Emissão'), cell('Fornecedor'), cell('UF'), cell('Valor (R$)'), cell('CFOP'), cell('Cobrança da SEFAZ na NF')]);
+        semItens.forEach(n => aE.push([cell(+n.nf || n.nf), dtc(n.emissao), cell(n.fornecedor), cell(n.uf), cell(n.valor, M), cell(n.cfops.join(' / ')), cell(cobTxt(n))]));
+      }
+      aE.push([], [cell(`Cobranças da SEFAZ sem nota de entrada escriturada no SPED (${E.refs.map(U.refLabel).join(', ')})`)]);
+      if (E.semNota.length) {
+        aE.push([cell('NF'), cell('Tributo'), cell('Referência'), cell('CNPJ remetente'), cell('UF'), cell('Valor da NF (R$)'), cell('ICMS cobrado (R$)')]);
+        E.semNota.forEach(c => aE.push([cell(+c.numero || c.numero), cell(c.tipo === 'EQ' ? 'Equalização (349)' : 'ICMS-ST (333)'), cell(U.refLabel(c.referencia)), cell(U.fmtCNPJ(c.cnpjRemetente)), cell(c.ufRemetente || ''), cell(+c.valorNF || 0, M), cell(+c.valorICMS || 0, M)]));
+      } else aE.push([cell('Nenhuma: todas as notas cobradas estão escrituradas.')]);
+      wsE = X.utils.aoa_to_sheet([[]], { cellDates: true });
+      X.utils.sheet_add_aoa(wsE, aE, { origin: 'A1', cellDates: true });
+      wsE['!cols'] = [9, 6, 7, 11, 11, 34, 19, 5, 46, 6, 10, 46, 16, 11, 9, 12, 12, 10, 9, 10, 40, 24].map(w => ({ wch: w }));
+      wsE['!autofilter'] = { ref: `A1:V${le}` };
+    }
 
     // --- Vendas ST por NF ---
     const porCod = new Map(prods.map(p => [p.cod, p]));
@@ -401,15 +589,16 @@
     // --- Resumo ---
     const p = an.param;
     const sit = k => `"${L[k].nome}"`;
+    const somaSit = (col, ks) => ks.map(k => `SUMIFS(${CAD}!${col}:${col},${CAD}!A:A,${sit(k)})`).join('+');
     const R = [
       [cell(`Vendas de ${U.refLabel(an.ref)} que deveriam ter saído como ST`)],
       [cell(`${nomeEmp}${c.cnpj ? ' - CNPJ ' + U.fmtCNPJ(c.cnpj) : ''}${c.ie ? ' - IE ' + c.ie : ''} - Simples Nacional${c.porte ? ' (' + c.porte + ')' : ''}${c.municipio ? ' - ' + c.municipio + '/' + (c.uf || '') : ''}`)],
-      [cell(`Fontes: ${an.docS.fileName}${an.docC ? '; ' + an.docC.fileName : ''}; memórias de cálculo do ICMS-ST e da Equalização importadas no Revisor ICMS-ST; Subanexo I do Anexo III do RICMS/MS.`)],
+      [cell(`Fontes: ${an.docS.fileName}${an.docC ? '; ' + an.docC.fileName : ''}${an.entradas ? '; ' + an.entradas.docs.map(d => d.fileName).join('; ') : ''}; memórias de cálculo do ICMS-ST e da Equalização importadas no Revisor ICMS-ST; Subanexo I do Anexo III do RICMS/MS.`)],
       [],
       [cell('1. Receitas do mês')],
       [cell(an.docC ? 'Receita bruta do mês no Controle do Simples (líquida de devoluções)' : 'Receita do mês (Registro de Saídas)'), cell(''), cell(an.tot.receitaMes, M)],
       [cell('Receita líquida no Registro de Saídas (conferência)'), cell(''), cell(an.tot.receitaSaidas, M)],
-      [cell('Vendas ST - ICMS-ST cobrado na entrada (ou definido como ST)'), cell(''), fml(`SUMIFS(${CAD}!M:M,${CAD}!A:A,${sit('st_cobrado')})-SUMIFS(${CAD}!N:N,${CAD}!A:A,${sit('st_cobrado')})+SUMIFS(${CAD}!M:M,${CAD}!A:A,${sit('st_manual')})-SUMIFS(${CAD}!N:N,${CAD}!A:A,${sit('st_manual')})`, M)],
+      [cell('Vendas ST - ICMS-ST cobrado ou retido na entrada (ou definido como ST)'), cell(''), fml(`${somaSit('M', FORTES)}-(${somaSit('N', FORTES)})`, M)],
       [cell('Vendas ST - conferir a NF de entrada'), cell(''), fml(`SUMIFS(${CAD}!M:M,${CAD}!A:A,${sit('st_conferir')})-SUMIFS(${CAD}!N:N,${CAD}!A:A,${sit('st_conferir')})`, M)],
       [cell('Total que deveria ser segregado como ST no PGDAS-D'), cell(''), fml('C8+C9', M)],
       [cell('Vendas de produtos ST já emitidas como ST (sem ajuste)'), cell(''), fml(`SUM(${CAD}!N2:N${lc})`, M)],
@@ -422,7 +611,7 @@
       [cell('ICMS embutido no DAS sobre cada R$ 1,00 vendido'), cell(''), fml('C16*C17', P)],
       [],
       [cell('3. ICMS do Simples pago a mais nas vendas ST')],
-      [cell('Sobre vendas com ICMS-ST cobrado na entrada'), cell(''), fml(`SUMIFS(${CAD}!O:O,${CAD}!A:A,${sit('st_cobrado')})+SUMIFS(${CAD}!O:O,${CAD}!A:A,${sit('st_manual')})`, M)],
+      [cell('Sobre vendas com ICMS-ST cobrado ou retido na entrada'), cell(''), fml(somaSit('O', FORTES), M)],
       [cell('Sobre vendas a conferir (depende da NF de entrada)'), cell(''), fml(`SUMIFS(${CAD}!O:O,${CAD}!A:A,${sit('st_conferir')})`, M)],
       [cell('Total estimado de ICMS pago a mais no DAS'), cell(''), fml('C21+C22', M)],
       [],
@@ -430,7 +619,8 @@
       [cell('a) Produtos com situação "ST": CSOSN 500 (ICMS cobrado anteriormente por ST), CEST indicado e CFOP 5405 (6404 interestadual). A receita passa a sair segregada como "com substituição tributária" no PGDAS-D e o ICMS deixa de ser cobrado no DAS (LC 123/2006, art. 18, § 4º-A, I).')],
       [cell('b) "Conferir a NF de entrada": só trate como ST depois de confirmar a retenção/cobrança do ICMS-ST na entrada; confira também se a descrição do CEST corresponde ao produto.')],
       [cell('c) Itens preparados na loja e produtos da Equalização continuam com CSOSN 102.')],
-      [cell('d) Confira o "Tipo de produto" no cadastro: mercadoria revendida deve estar como "Mercadoria para revenda".')]
+      [cell('d) Confira o "Tipo de produto" no cadastro: mercadoria revendida deve estar como "Mercadoria para revenda".')],
+      [cell(an.entradas ? 'e) Entradas: mercadoria com ICMS-ST cobrado ou retido na entrada deve ser escriturada com CFOP 2403 (interestadual) ou 1403 (dentro do estado), e não 2102/1102. Veja as colunas "CFOP de entrada" no Cadastro ERP e a aba "Entradas (SPED)", que também lista as cobranças da SEFAZ sem nota escriturada.' : 'e) Importe o SPED Fiscal (EFD ICMS/IPI) do mês para conferir as notas de entrada e o CFOP escriturado.')]
     ];
     const wsR = X.utils.aoa_to_sheet([[]]);
     X.utils.sheet_add_aoa(wsR, R, { origin: 'A1' });
@@ -440,9 +630,10 @@
     X.utils.book_append_sheet(wb, wsR, 'Resumo');
     X.utils.book_append_sheet(wb, wsCad, 'Cadastro ERP');
     X.utils.book_append_sheet(wb, wsV, 'Vendas ST por NF');
+    if (wsE) X.utils.book_append_sheet(wb, wsE, 'Entradas (SPED)');
     X.writeFile(wb, `vendas-que-deveriam-ser-st-${U.slug(c.nomeFantasia || c.razaoSocial || 'empresa')}-${an.ref}.xlsx`);
     return { produtos: prods.length, linhas: linhas.length };
   }
 
-  global.RST_VENDAS = { lerPlanilhaMakro, lerRegSaidas, lerControleSimples, infoDoNome, analisar, exportar, aliquotaAnexoI, rbt12Sugerida, receitasPorMes, SIT, AJUSTES, ANEXO_I };
+  global.RST_VENDAS = { lerPlanilhaMakro, lerRegSaidas, lerControleSimples, lerEFD, ehEFD, infoDoNome, analisar, exportar, aliquotaAnexoI, rbt12Sugerida, receitasPorMes, SIT, FORTES, AJUSTES, ANEXO_I };
 })(window);

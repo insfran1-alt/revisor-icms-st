@@ -15,7 +15,7 @@ Ferramenta web para **revisar as cobranças de ICMS-ST (tributo 333) e de ICMS E
 
 ## Como usar
 
-> Novidade: tela **Vendas × ST**, que cruza o Registro de Saídas e o Controle do Simples (Makro) com as cobranças de ST (veja a seção própria abaixo).
+> Novidade: tela **Vendas × ST**, que cruza o Registro de Saídas e o Controle do Simples (Makro) com as cobranças de ST (veja a seção própria abaixo). Agora também lê o SPED Fiscal de entradas.
 
 1. **Empresas** — importe o **cartão CNPJ** (PDF da Receita). As atividades (CNAE), o porte e a data de abertura ficam salvos e orientam a análise.
 2. **Importar** — arraste de uma vez (várias empresas e meses):
@@ -100,9 +100,13 @@ O que a tela faz:
 Mede o ICMS pago a mais no DAS quando mercadorias com ICMS-ST já recolhido saem com CSOSN 102. A receita delas deveria ser segregada no PGDAS-D como "com substituição tributária" (LC 123/2006, art. 18, § 4º-A, I).
 
 - **Arquivos:** *Registro de Saídas Detalhado* e *Controle de Cálculo do Simples Nacional*, exportados em Excel pelo sistema contábil (Makro). A empresa vem do nome do arquivo (código do escritório ou razão social), e a referência vem das datas das vendas. Ajuste pelo ícone de lápis em *Importar* se precisar.
+- **SPED Fiscal de entradas (opcional, recomendado):** o arquivo TXT da EFD ICMS/IPI. O app guarda só as notas de entrada (C100/C170), reconhece a empresa pelo CNPJ e cruza cada nota com as cobranças de ICMS-ST e Equalização importadas.
+  - Mostra as notas interestaduais sem cobrança localizada e as cobranças da SEFAZ sem nota escriturada.
+  - Os produtos são ligados pelo GTIN (ou pela descrição), porque o código do produto no SPED pode ser diferente do código no relatório de saídas.
 - **Classificação de cada produto vendido:**
   - *ST cobrado na entrada:* mesmo GTIN ou descrição numa memória de ICMS-ST da empresa.
-  - *Conferir a NF de entrada:* NCM do Subanexo I sem cobrança localizada.
+  - *ST retido antes:* com o SPED, produto do Subanexo I comprado dentro do estado ou com ICMS-ST destacado na NF de entrada.
+  - *Conferir a NF de entrada:* NCM do Subanexo I sem cobrança localizada. Com o SPED, a observação indica a NF de entrada e se ela tem cobrança no app.
   - *Já emitido como ST:* CSOSN 500 ou CST 60.
   - *Não ST:* produtos de Equalização, itens preparados na loja (empresas de alimentação, sem GTIN) e itens fora da lista.
   - O usuário pode mudar a situação e o CEST de qualquer produto.
@@ -112,8 +116,9 @@ Mede o ICMS pago a mais no DAS quando mercadorias com ICMS-ST já recolhido saem
   - A RBT12, a alíquota efetiva e o % do ICMS podem ser informados à mão, conforme o extrato do PGDAS-D.
 - **Excel:**
   - *Resumo*, com fórmulas.
-  - *Cadastro ERP*: CEST, CSOSN 500 e CFOP 5405/6404 por produto.
+  - *Cadastro ERP*: CEST, CSOSN 500 e CFOP 5405/6404 por produto; com o SPED, também as NFs de entrada, o fornecedor e o CFOP de entrada escriturado e o correto (2403/1403).
   - *Vendas ST por NF*: item a item.
+  - *Entradas (SPED)*: cada item das notas de entrada, com o CFOP correto, a situação do produto e a cobrança da SEFAZ na nota; no fim, as cobranças sem nota escriturada.
 
 ## O pedido na SEFAZ/MS
 
@@ -158,7 +163,7 @@ assets/css/app.css      visual (tema claro/escuro, responsivo)
 assets/js/util.js       utilitários (números, datas, CNPJ, NCM…)
 assets/js/pdftext.js    extração de texto dos PDFs (pdf.js)
 assets/js/parsers.js    leitura: prévia, "Dados da Nota", memória ST, cartão CNPJ, XML
-assets/js/vendas.js     Vendas × ST: Registro de Saídas e Controle do Simples (Makro), classificação e Excel
+assets/js/vendas.js     Vendas × ST: Registro de Saídas e Controle do Simples (Makro), SPED de entradas, classificação e Excel
 assets/js/daems.js      Recolhimentos: DIFAL e Equalização devidos nos itens revisados, nº do DAEMS e memória
 assets/js/legal.js      base legal e catálogo de checagens
 assets/js/subanexo.js   leitura e consulta da relação oficial (Subanexo I)

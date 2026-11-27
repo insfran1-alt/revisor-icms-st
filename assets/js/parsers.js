@@ -589,7 +589,14 @@
         });
         if (!out.length) out.push({ kind: 'desconhecido', data: {}, warnings: ['Planilha sem o cabeçalho esperado (DESCRIÇÃO, NCM/SH… ou a tela "Dados da Nota" com NCM, Descrição, Percentual…).'] });
       } else if (['csv', 'txt', 'tsv'].includes(ext)) {
-        const text = new TextDecoder('utf-8').decode(buf);
+        let text;
+        try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (_) { text = new TextDecoder('windows-1252').decode(buf); }
+        // SPED Fiscal (EFD ICMS/IPI): notas de entrada
+        if (global.RST_VENDAS && global.RST_VENDAS.ehEFD(text)) {
+          const efd = global.RST_VENDAS.lerEFD(text, name);
+          out.push(efd || { kind: 'desconhecido', data: {}, warnings: ['Arquivo do SPED Fiscal sem o registro 0000.'] });
+          return out.map((d, i) => Object.assign({}, base, d, { part: i }));
+        }
         lerTabela(parseCSVText(text)).forEach(r => out.push(docDaTabela(r, numeroDoNomeArquivo(name))));
         if (!out.length) out.push({ kind: 'desconhecido', data: {}, warnings: ['Arquivo de texto sem o cabeçalho esperado.'] });
       } else if (ext === 'xml') {
