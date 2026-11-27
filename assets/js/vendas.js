@@ -157,7 +157,7 @@
     ['nf', /^n[oº]? nf/], ['especie', /^especie/], ['serie', /^serie/], ['valorNota', /^valor contabil$/], ['codPart', /^codigo$/],
     ['part', /^nome (fornecedor|cliente)/], ['uf', /^uf$/], ['doc', /^inscricao/], ['codigo', /^codigo produto/], ['nome', /^nome do produto/],
     ['cfop', /^cfop produto/], ['cfopNota', /^cfop nota/], ['ncm', /^ncm/], ['cst', /^cst csosn/], ['unid', /^unidade/], ['qtd', /^quantidade/],
-    ['valor', /^valor produto/], ['bcST', /^b c icms st/], ['icmsST', /^valor icms st/], ['despesas', /^despesas acessorias/],
+    ['valor', /^valor produto/], ['bcST', /^b c icms st/], ['icmsST', /^valor icms st/], ['despesas', /^despesas acessorias/], ['frete', /^valor frete/],
     ['desconto', /^valor desconto/], ['chave', /^chave/]
   ];
   const CFOP_ENT_ST = ['1401', '1403', '2401', '2403'];
@@ -186,7 +186,7 @@
     const modDe = e => ({ 36: '55', 41: '65', 1: '01' }[+e] || String(e || ''));
 
     const sProd = {}, linhas = [], eProd = {}, parts = {}, notasMap = new Map();
-    let canc = 0, foraVenda = 0, foraVendaValor = 0, devol = 0;
+    let canc = 0, foraVenda = 0, foraVendaValor = 0, devol = 0, nDevol = 0;
     for (let i = hi + 1; i < rows.length; i++) {
       const r = rows[i];
       const tipo = nh(g(r, 'tipo'));
@@ -198,11 +198,13 @@
       const cod = s(r, 'codigo') || U.normKey(nome).slice(0, 30);
       const cfop = U.digits(g(r, 'cfop')) || U.digits(g(r, 'cfopNota'));
       const qtd = U.round2(num(g(r, 'qtd')) * 1000) / 1000, valor = U.round2(num(g(r, 'valor'))), desc = U.round2(num(g(r, 'desconto')));
+      // na venda e na devolução de venda, a receita é o valor contábil do item: produto + frete + despesas − desconto
+      const valorRec = U.round2(valor + num(g(r, 'frete')) + num(g(r, 'despesas')));
       if (tipo === 'saida') {
         if (!ehVendaCfop(cfop)) { foraVenda++; foraVendaValor += valor - desc; continue; }
         if (!sProd[cod]) sProd[cod] = { nome, ean: '', tipo: '', ncm: U.digits(g(r, 'ncm')), cest: '' };
         // [código, NF, modelo, data, qtd, CFOP, CST/CSOSN, valor, desconto]
-        linhas.push([cod, String(+nf), modDe(g(r, 'especie')), isoDe(g(r, 'emissao')) || isoDe(g(r, 'dataES')), qtd, cfop, U.digits(g(r, 'cst')), valor, desc]);
+        linhas.push([cod, String(+nf), modDe(g(r, 'especie')), isoDe(g(r, 'emissao')) || isoDe(g(r, 'dataES')), qtd, cfop, U.digits(g(r, 'cst')), valorRec, desc]);
       } else {
         const codPart = s(r, 'codPart') || U.digits(g(r, 'doc')) || s(r, 'part');
         if (!parts[codPart]) parts[codPart] = { nome: s(r, 'part'), cnpj: U.digits(g(r, 'doc')), ie: '', uf: s(r, 'uf').toUpperCase() };
@@ -219,7 +221,12 @@
         const seg = `${cfN}|${num(g(r, 'valorNota'))}`;
         if (!n._seg.has(seg)) { n._seg.add(seg); n.valor = U.round2(n.valor + num(g(r, 'valorNota'))); }
         if (cfN && !n.cfops.includes(cfN)) n.cfops.push(cfN);
-        if (/^[12](20[12]|41[01])$/.test(cfop)) devol += valor - desc;
+        if (/^[12](20[12]|41[01])$/.test(cfop)) {
+          // devolução de venda: abate a venda do produto (linha negativa), como no PGDAS-D (5102 − 1202; 5405 − 1411)
+          devol += valorRec - desc; nDevol++;
+          if (!sProd[cod]) sProd[cod] = { nome, ean: '', tipo: '', ncm: U.digits(g(r, 'ncm')), cest: '' };
+          linhas.push([cod, String(+nf), modDe(g(r, 'especie')), isoDe(g(r, 'dataES')) || isoDe(g(r, 'emissao')), -qtd, cfop, U.digits(g(r, 'cst')), -valorRec, -desc]);
+        }
         // ICMS-ST: campo próprio ou, nas compras com CFOP de ST, o valor lançado em despesas acessórias
         const st = num(g(r, 'icmsST')) || (CFOP_ENT_ST.includes(cfop) ? num(g(r, 'despesas')) : 0);
         n.itens.push([n.itens.length + 1, cod, '', qtd, valor, desc, U.digits(g(r, 'cst')), cfop, U.round2(st)]);
@@ -234,7 +241,7 @@
       const w = [];
       if (foraVenda) w.push(`${foraVenda} item(ns) de saída com CFOP que não é de venda (ex.: 5949, devolução de compra) ficaram fora: ${U.brl(U.round2(foraVendaValor))}.`);
       if (canc) w.push(`${canc} linha(s) de notas canceladas ou numeração inutilizada ignoradas.`);
-      if (devol > 0) w.push(`Há devoluções de venda nas entradas (${U.brl(U.round2(devol))}); sem o Controle do Simples, a receita do mês não as desconta.`);
+      if (devol > 0) w.push(`${nDevol} item(ns) de devolução de venda (CFOP 1202/1411) abatido(s) das vendas dos produtos: ${U.brl(U.round2(devol))}.`);
       out.push({ kind: 'saidas', data: Object.assign({}, base, { produtos: sProd, linhas, total: U.round2(U.sum(linhas, l => l[7] - l[8])), nProdutos: Object.keys(sProd).length }), warnings: w });
     }
     if (notas.length) {
@@ -433,10 +440,11 @@
     if (!pont.length || !pont[0].n || (pont[1] && pont[1].n === pont[0].n && pont[1].e.cest !== pont[0].e.cest)) return null;
     return pont[0].e;
   }
-  const jaST = cst => { const d = U.digits(cst); return d.length >= 4 ? d.slice(-3) === '500' : d.length >= 2 && d.slice(-2) === '60'; };
+  // CSOSN 500 ("500" ou com a origem, "0500") ou CST 60 ("60" ou com a origem, "060")
+  const jaST = cst => { const d = U.digits(cst); return d.length >= 4 ? d.slice(-3) === '500' : d.length === 3 ? (d === '500' || d.slice(-2) === '60') : d.length === 2 && d === '60'; };
   /** Linha de venda já tratada como ST: pelo CSOSN/CST ou, quando o relatório não traz o CST (Domínio), pelo CFOP 5401/5403/5405/6401/6403/6404. */
-  const jaSTL = l => U.digits(l[6]) ? jaST(l[6]) : /^[56]40[1-5]$/.test(l[5]);
-  const cfopST = cfop => ({ 5101: '5401', 5102: '5405', 5403: '5403', 5405: '5405', 6101: '6401', 6102: '6404', 6403: '6403', 6404: '6404' }[cfop] || cfop);
+  const jaSTL = l => U.digits(l[6]) ? jaST(l[6]) : /^[56]40[1-5]$|^[12]41[01]$/.test(l[5]);
+  const cfopST = cfop => ({ 5101: '5401', 5102: '5405', 5403: '5403', 5405: '5405', 6101: '6401', 6102: '6404', 6403: '6403', 6404: '6404', 1202: '1411', 2202: '2411' }[cfop] || cfop);
   const csosnST = cst => { const d = U.digits(cst); return d.length >= 4 ? d.charAt(0) + '500' : '500'; };
   const temGtin = e => { const d = U.digits(e); return d.length >= 8 && !/^0+$/.test(d); };
   const cnaesDe = c => [c.cnaePrincipal].concat(c.cnaesSecundarios || []).filter(Boolean).map(x => U.digits(x.codigo || x.cod || x));
@@ -659,6 +667,7 @@
    * ============================================================ */
   function exportar(an, filtroSit) {
     const X = global.XLSX;
+    const dom = an.docS.data.formato === 'dominio-produtos-nota';
     if (!X) throw new Error('Biblioteca de planilhas não carregada.');
     const c = an.company;
     const nomeEmp = c.razaoSocial || c.nomeFantasia || 'Empresa';
@@ -748,8 +757,8 @@
       [cell(`Fontes: ${U.uniq([an.docS.fileName].concat(an.docC ? [an.docC.fileName] : [], an.entradas ? an.entradas.docs.map(d => d.fileName) : [])).join('; ')}; memórias de cálculo do ICMS-ST e da Equalização importadas no Revisor ICMS-ST; Subanexo I do Anexo III do RICMS/MS.`)],
       [],
       [cell('1. Receitas do mês')],
-      [cell(an.docC ? 'Receita bruta do mês no Controle do Simples (líquida de devoluções)' : 'Receita do mês (Registro de Saídas)'), cell(''), cell(an.tot.receitaMes, M)],
-      [cell('Receita líquida no Registro de Saídas (conferência)'), cell(''), cell(an.tot.receitaSaidas, M)],
+      [cell(an.docC ? 'Receita bruta do mês no Controle do Simples (líquida de devoluções)' : dom ? 'Receita do mês (vendas menos devoluções de venda, Domínio)' : 'Receita do mês (Registro de Saídas)'), cell(''), cell(an.tot.receitaMes, M)],
+      [cell(dom ? 'Receita líquida no relatório da Domínio (conferência)' : 'Receita líquida no Registro de Saídas (conferência)'), cell(''), cell(an.tot.receitaSaidas, M)],
       [cell('Vendas ST - ICMS-ST cobrado ou retido na entrada (ou definido como ST)'), cell(''), fml(`${somaSit('M', FORTES)}-(${somaSit('N', FORTES)})`, M)],
       [cell('Vendas ST - conferir a NF de entrada'), cell(''), fml(`SUMIFS(${CAD}!M:M,${CAD}!A:A,${sit('st_conferir')})-SUMIFS(${CAD}!N:N,${CAD}!A:A,${sit('st_conferir')})`, M)],
       [cell('Total que deveria ser segregado como ST no PGDAS-D'), cell(''), fml('C8+C9', M)],

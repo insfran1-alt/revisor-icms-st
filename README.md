@@ -104,7 +104,7 @@ Mede o ICMS pago a mais no DAS quando mercadorias com ICMS-ST já recolhido saem
   - Mostra as notas interestaduais sem cobrança localizada e as cobranças da SEFAZ sem nota escriturada.
   - Os produtos são ligados pelo GTIN (ou pela descrição), porque o código do produto no SPED pode ser diferente do código no relatório de saídas.
 - **Domínio — Relação de Produtos por Nota (XLS):** substitui o Registro de Saídas e o SPED, porque traz as entradas e as saídas item a item. A empresa é reconhecida pelo CNPJ do cabeçalho; se ela ainda não estiver cadastrada, o vínculo é feito quando o cartão CNPJ for importado.
-  - Vendas: só CFOP de venda (51xx, 54xx, 61xx, 64xx). Como o relatório não traz o CSOSN, a venda com CFOP 5405/6404 conta como já emitida como ST.
+  - Vendas: só CFOP de venda (51xx, 54xx, 61xx, 64xx), pelo valor contábil do item (produto + frete + despesas − desconto). As devoluções de venda (1202/2202 e 1411/2411) abatem a venda do próprio produto, como no PGDAS-D (5102 − 1202; 5405 − 1411). Sem CSOSN no relatório, a venda com CFOP 5405/6404 (e a devolução 1411) conta como já emitida como ST.
   - Entradas: o ICMS-ST vem do campo próprio ou, nas compras com CFOP 1403/2403, das despesas acessórias. Devoluções de cliente, fretes e remessas não servem de origem do produto.
   - Produtos ligados pelo código da Domínio (o mesmo nas entradas e saídas) ou pela descrição; não há GTIN nem CEST.
   - O app corrige sozinho a posição errada da aba que esse .xls traz e que impede a leitura.
