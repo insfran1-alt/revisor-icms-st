@@ -578,7 +578,10 @@
       } else if (['xlsx', 'xlsm', 'xls', 'ods'].includes(ext)) {
         if (!global.XLSX) throw new Error('Biblioteca de planilhas não carregada (verifique a conexão).');
         const wb = global.XLSX.read(new Uint8Array(buf), { type: 'array' });
-        wb.SheetNames.forEach(sn => {
+        // relatórios do sistema contábil (Makro): Registro de Saídas Detalhado e Controle de Cálculo do Simples
+        const mk = global.RST_VENDAS ? global.RST_VENDAS.lerPlanilhaMakro(wb, name) : null;
+        if (mk) out.push(mk);
+        else wb.SheetNames.forEach(sn => {
           const rows = global.XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: '' });
           const numSheet = /\d{3,9}/.test(sn) ? String(+sn.match(/\d{3,9}/)[0]) : '';
           const numAlt = (wb.SheetNames.length > 1 && numSheet) ? numSheet : (numeroDoNomeArquivo(name) || numSheet);

@@ -43,11 +43,12 @@
     { id: 'importar', nome: 'Importar', icon: 'upload' },
     { id: 'revisao', nome: 'Revisão', icon: 'checklist' },
     { id: 'notas', nome: 'Notas e itens', icon: 'file' },
+    { id: 'vendas', nome: 'Vendas × ST', icon: 'layers' },
     { id: 'empresas', nome: 'Empresas', icon: 'building' },
     { id: 'tabelas', nome: 'Tabelas e regras', icon: 'sliders' },
     { id: 'ajuda', nome: 'Como usar', icon: 'help' }
   ];
-  const TIPO_DOC = { previa: 'Relatório de prévia', itens: 'Memória de cálculo', cnpj: 'Cartão CNPJ', nfe: 'XML da NF-e' };
+  const TIPO_DOC = { previa: 'Relatório de prévia', itens: 'Memória de cálculo', cnpj: 'Cartão CNPJ', nfe: 'XML da NF-e', saidas: 'Registro de Saídas', simples: 'Controle do Simples' };
   const PAGE = 50;
 
   const App = { state: null, model: null, ui: null, sel: new Set(), lastImport: null, reqOpts: null };
@@ -59,7 +60,8 @@
       notas: { q: '', tipo: '', achados: false, page: 1, modo: 'notas' },
       itens: { q: '', tipo: '', revisao: '', agrupar: '', ordem: 'az', page: 1, abertos: [] },
       memoria: { tipo: 'ST', q: '', revisao: '', agrupar: '', filtros: {}, sort: null, vazias: false, page: 1, fechados: [] },
-      docs: { kind: '' }
+      docs: { kind: '' },
+      vendas: { q: '', sit: '' }
     };
   }
 
@@ -80,7 +82,7 @@
     setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 320); }, ms);
   }
 
-  const savePrefs = U.debounce(() => ST.prefSet('ui', { view: App.ui.view, empresa: App.ui.empresa, ref: App.ui.ref, rev: Object.assign({}, App.ui.rev, { page: 1 }), notas: Object.assign({}, App.ui.notas, { page: 1 }), itens: Object.assign({}, App.ui.itens, { page: 1, abertos: [] }), memoria: Object.assign({}, App.ui.memoria, { page: 1, fechados: [] }) }), 300);
+  const savePrefs = U.debounce(() => ST.prefSet('ui', { view: App.ui.view, empresa: App.ui.empresa, ref: App.ui.ref, rev: Object.assign({}, App.ui.rev, { page: 1 }), notas: Object.assign({}, App.ui.notas, { page: 1 }), itens: Object.assign({}, App.ui.itens, { page: 1, abertos: [] }), memoria: Object.assign({}, App.ui.memoria, { page: 1, fechados: [] }), vendas: App.ui.vendas }), 300);
   const persist = U.debounce(() => ST.save(App.state).then(updateStorageInfo), 350);
 
   function recompute() {
@@ -126,10 +128,11 @@
     const v = VIEWS.find(x => x.id === App.ui.view) || VIEWS[0];
     $('#view-title').textContent = v.nome;
     document.title = `${v.nome} · Revisor ICMS-ST`;
-    const fn = { painel: viewPainel, importar: viewImportar, revisao: viewRevisao, notas: viewNotas, empresas: viewEmpresas, tabelas: viewTabelas, ajuda: viewAjuda }[v.id];
+    const fn = { painel: viewPainel, importar: viewImportar, revisao: viewRevisao, notas: viewNotas, vendas: viewVendas, empresas: viewEmpresas, tabelas: viewTabelas, ajuda: viewAjuda }[v.id];
     $('#view').innerHTML = fn();
     if (v.id === 'revisao') renderRevResults();
     if (v.id === 'notas') renderNotasView();
+    if (v.id === 'vendas') renderVendasResults();
     updateStorageInfo();
   }
 
@@ -149,7 +152,8 @@
   function renderScope() {
     const comps = [...App.model.companies.values()].sort((a, b) => nomeCurto(a).localeCompare(nomeCurto(b)));
     $('#scope-empresa').innerHTML = opt('', 'Todas as empresas', App.ui.empresa) + comps.map(c => opt(c.id, nomeCurto(c), App.ui.empresa)).join('');
-    const refs = U.uniq(App.model.charges.filter(c => !App.ui.empresa || c.companyId === App.ui.empresa).map(c => c.referencia).filter(Boolean)).sort().reverse();
+    const refsVendas = App.state.docs.filter(d => (d.kind === 'saidas' || d.kind === 'simples') && (!App.ui.empresa || (d.link && d.link.companyId === App.ui.empresa))).map(d => (d.link && d.link.referencia) || d.data.referencia);
+    const refs = U.uniq(App.model.charges.filter(c => !App.ui.empresa || c.companyId === App.ui.empresa).map(c => c.referencia).concat(refsVendas).filter(Boolean)).sort().reverse();
     if (App.ui.ref && !refs.includes(App.ui.ref)) refs.unshift(App.ui.ref);
     $('#scope-ref').innerHTML = opt('', 'Todas as referências', App.ui.ref) + refs.map(r => opt(r, 'Ref. ' + U.refLabel(r), App.ui.ref)).join('');
   }
@@ -300,6 +304,12 @@
     }
     if (d.kind === 'nfe') { nf = 'NF ' + d.data.numero; itens = d.data.itens.length; valor = d.data.valorNF; const nfm = m.nfs.find(x => x.xml && x.xml.id === d.id); vincOk = !!nfm; vinc = nfm ? 'Cobrança' : 'Sem cobrança'; if (nfm) companyId = nfm.companyId; }
     if (d.kind === 'cnpj') { nf = U.fmtCNPJ(d.data.cnpj); vinc = 'Empresa'; }
+    if (d.kind === 'saidas' || d.kind === 'simples') {
+      ref = (d.link && d.link.referencia) || d.data.referencia;
+      if (d.kind === 'saidas') { itens = d.data.linhas.length; nf = `${d.data.nProdutos} produto(s)`; valor = d.data.total; }
+      else { valor = d.data.receita; nf = `${d.data.notas} NF`; }
+      vincOk = !!companyId; vinc = companyId ? 'Empresa' : 'Sem empresa';
+    }
     return { companyId, ref, tipo, nf, itens, valor, vinc, vincOk, partes };
   }
 
@@ -320,7 +330,7 @@
           <div class="ico">${ic('upload')}</div>
           <h3>Arraste e solte os arquivos aqui</h3>
           <div class="muted">ou clique para selecionar — vários de uma vez, de várias empresas</div>
-          <div class="types"><span>Relatório de Prévia (PDF)</span><span>Dados da Nota (Excel ou PDF)</span><span>Memória ST (XLSX/CSV)</span><span>XML da NF-e</span><span>Cartão CNPJ (PDF)</span></div>
+          <div class="types"><span>Relatório de Prévia (PDF)</span><span>Dados da Nota (Excel ou PDF)</span><span>Memória ST (XLSX/CSV)</span><span>XML da NF-e</span><span>Cartão CNPJ (PDF)</span><span>Registro de Saídas e Controle do Simples (Makro, XLSX)</span></div>
           <div class="progress hidden" id="imp-progress"><span></span></div>
           <div class="tiny muted" id="imp-status"></div>
         </div>
@@ -340,7 +350,7 @@
       </div>
       <div class="card">
         <div class="card-head"><h3>Documentos importados</h3><span class="pill neutro">${App.state.docs.length}</span>
-          <div class="sp chips">${[['', 'Todos'], ['previa', 'Prévias'], ['itens', 'Memórias'], ['nfe', 'XML'], ['cnpj', 'Cartões CNPJ']].map(([k, n]) => `<button type="button" class="chip ${kind === k ? 'on' : ''}" data-act="doc-kind" data-v="${k}">${n}${k ? ` (${(counts[k] || []).length})` : ''}</button>`).join('')}</div></div>
+          <div class="sp chips">${[['', 'Todos'], ['previa', 'Prévias'], ['itens', 'Memórias'], ['nfe', 'XML'], ['cnpj', 'Cartões CNPJ'], ['saidas', 'Saídas'], ['simples', 'Controle Simples']].map(([k, n]) => `<button type="button" class="chip ${kind === k ? 'on' : ''}" data-act="doc-kind" data-v="${k}">${n}${k ? ` (${(counts[k] || []).length})` : ''}</button>`).join('')}</div></div>
         <div class="table-wrap"><table class="data">
           <thead><tr><th>Arquivo</th><th>Tipo</th><th>Empresa</th><th>Ref.</th><th>NF</th><th class="num">Itens</th><th class="num">ICMS / valor</th><th>Vínculo</th><th>Avisos</th><th></th></tr></thead>
           <tbody>${docs.length ? docs.map(d => {
@@ -353,11 +363,123 @@
               <td class="num">${i.itens === '' ? '' : i.itens}</td><td class="num">${i.valor === null ? '' : U.brl(i.valor)}</td>
               <td>${i.vinc ? `<span class="pill ${i.vincOk ? 'ok' : 'moderada'}">${h(i.vinc)}</span>` : ''}</td>
               <td>${warn ? `<span class="pill moderada" title="${h(d.warnings.join('\n'))}">${warn} aviso(s)</span>` : '<span class="sub">—</span>'}</td>
-              <td class="nowrap">${d.kind === 'itens' || d.kind === 'previa' ? `<button class="btn sm ghost" type="button" data-act="edit-link" data-doc="${h(d.id)}" title="Ajustar vínculo">${ic('edit')}</button>` : ''}<button class="btn sm ghost danger" type="button" data-act="rm-doc" data-doc="${h(d.id)}" title="Remover documento">${ic('trash')}</button></td></tr>`;
+              <td class="nowrap">${['itens', 'previa', 'saidas', 'simples'].includes(d.kind) ? `<button class="btn sm ghost" type="button" data-act="edit-link" data-doc="${h(d.id)}" title="Ajustar vínculo">${ic('edit')}</button>` : ''}<button class="btn sm ghost danger" type="button" data-act="rm-doc" data-doc="${h(d.id)}" title="Remover documento">${ic('trash')}</button></td></tr>`;
           }).join('') : '<tr class="empty-row"><td colspan="10">Nenhum documento importado.</td></tr>'}</tbody>
         </table></div>
       </div>
     </div>`;
+  }
+
+  /* ============================================================
+   * Vendas × ST (Registro de Saídas + Controle do Simples)
+   * ============================================================ */
+  const V = () => global.RST_VENDAS;
+  const relatoriosVendas = () => App.state.docs.filter(d => d.kind === 'saidas');
+  const FILTROS_VENDAS = [['', 'Todos'], ['segregar', 'A segregar como ST'], ['st_conferir', 'Conferir entrada'], ['st_ja', 'Já como ST'], ['naost', 'Não ST']];
+  const passaFiltroVendas = (p, f) => !f || (f === 'segregar' ? ['st_cobrado', 'st_manual', 'st_conferir'].includes(p.sit) : f === 'naost' ? !V().SIT[p.sit].st : p.sit === f);
+
+  function listaRelatoriosVendas(docs) {
+    const m = App.model;
+    const linhas = docs.slice().sort((a, b) => String((b.link && b.link.referencia) || b.data.referencia).localeCompare(String((a.link && a.link.referencia) || a.data.referencia)));
+    return `<div class="table-wrap"><table class="data"><thead><tr><th>Empresa</th><th>Ref.</th><th class="num">Produtos</th><th class="num">Itens vendidos</th><th class="num">Receita</th><th>Controle do Simples</th><th></th></tr></thead><tbody>
+      ${linhas.map(d => {
+        const cid = d.link && d.link.companyId, ref = (d.link && d.link.referencia) || d.data.referencia, c = m.companies.get(cid);
+        const temC = App.state.docs.some(x => x.kind === 'simples' && x.link && x.link.companyId === cid && (x.link.referencia || x.data.referencia) === ref);
+        return `<tr><td class="small">${c ? h(nomeCurto(c)) : `<span class="pill moderada">Sem empresa</span> <span class="sub">${h(d.data.empresaNome || d.fileName)}</span>`}</td><td class="small">${h(U.refLabel(ref))}</td><td class="num">${d.data.nProdutos}</td><td class="num">${d.data.linhas.length}</td><td class="num">${U.brl(d.data.total)}</td>
+          <td>${temC ? '<span class="pill ok">Importado</span>' : '<span class="pill neutro">Não importado</span>'}</td>
+          <td class="nowrap">${c ? `<button class="btn sm primary" type="button" data-go="vendas" data-empresa="${h(cid)}" data-ref="${h(ref)}">Abrir</button>` : `<button class="btn sm" type="button" data-act="edit-link" data-doc="${h(d.id)}">${ic('edit')} Definir empresa</button>`}</td></tr>`;
+      }).join('')}</tbody></table></div>`;
+  }
+
+  function viewVendas() {
+    App.vendasAn = null;
+    const docs = relatoriosVendas();
+    const intro = `<div class="muted small">Importe o <b>Registro de Saídas Detalhado</b> e o <b>Controle de Cálculo do Simples Nacional</b> (Excel da Makro) de cada empresa e mês. O app cruza as vendas com as memórias de ICMS-ST e de Equalização já importadas e com o Subanexo I, aponta os produtos que deveriam sair com CSOSN 500 e calcula o ICMS embutido no DAS pago a mais.</div>`;
+    if (!docs.length) return `<div class="card empty"><div class="ico">${ic('layers')}</div><h3>Vendas que deveriam ser ST</h3>${intro}<div class="row" style="justify-content:center;margin-top:12px"><button class="btn primary" type="button" data-act="pick-files">${ic('upload')} Importar relatórios</button></div></div>`;
+    const cid = App.ui.empresa, ref = App.ui.ref;
+    const an = cid && ref ? V().analisar(App.state, App.model, cid, ref) : null;
+    if (!an) {
+      const doEscopo = docs.filter(d => (!cid || (d.link && d.link.companyId === cid)) && (!ref || ((d.link && d.link.referencia) || d.data.referencia) === ref));
+      return `<div class="stack"><div class="card card-pad stack">${intro}<div class="callout">${cid && ref ? `Não há Registro de Saídas desta empresa em ${h(U.refLabel(ref))}.` : 'Escolha a empresa e a referência no topo da tela, ou abra um dos relatórios abaixo.'}</div></div>
+        <div class="card"><div class="card-head"><h3>Relatórios de saídas importados</h3><span class="pill neutro">${doEscopo.length}</span></div>${listaRelatoriosVendas(doEscopo.length ? doEscopo : docs)}</div></div>`;
+    }
+    App.vendasAn = an;
+    const p = an.param, t = an.tot, mn = p.manual;
+    const vazio = v => v === undefined || v === null || v === '';
+    return `<div class="stack">
+      <div class="card hero">
+        <div>
+          <div class="muted small">ICMS do Simples pago a mais nas vendas de produtos com ST · ${h(nomeCurto(an.company))} · ${h(U.refLabel(an.ref))}</div>
+          <div class="big">${U.brl(t.icms)}</div>
+          <p class="lead">${U.brl(t.cobrado + t.conferir)} em vendas a segregar como ST (${t.receitaMes ? U.fmt((t.cobrado + t.conferir) / t.receitaMes * 100, 1) : '0'}% da receita de ${U.brl(t.receitaMes)}) · ICMS de ${U.pct(p.fator * 100, 4)} embutido no DAS</p>
+          <div class="legend"><span><i class="dot forte"></i>ST cobrado na entrada ${U.brl(t.cobrado)} → ${U.brl(t.icmsCobrado)}</span><span><i class="dot moderada"></i>Conferir entrada ${U.brl(t.conferir)} → ${U.brl(t.icmsConferir)}</span><span><i class="dot ok"></i>Já emitido como ST ${U.brl(t.jaST)}</span></div>
+        </div>
+        <div class="stack">
+          <div class="callout ${an.docC ? 'ok' : 'warn'}">${an.docC ? `<b>Controle do Simples:</b> receita de ${U.brl(an.docC.data.receita)}${an.docC.data.devolucoes ? `, devoluções ${U.brl(an.docC.data.devolucoes)}` : ''}${Math.abs(an.docC.data.receita - t.receitaSaidas) > 1 ? `. <b>Atenção:</b> difere do Registro de Saídas (${U.brl(t.receitaSaidas)}).` : ' — confere com o Registro de Saídas.'}` : '<b>Controle do Simples não importado:</b> usando a receita do Registro de Saídas.'}</div>
+          <div class="row"><button class="btn primary" type="button" data-act="export-vendas">${ic('download')} Relatório Excel para a empresa</button><button class="btn" type="button" data-go="vendas" data-empresa="" data-ref="">Outros relatórios</button></div>
+        </div>
+      </div>
+      <div class="card card-pad stack">
+        <div class="card-head" style="padding:0"><h3>Alíquota do DAS (Anexo I)</h3><span class="sp muted small">Deixe em branco para o cálculo automático; confira com o extrato do PGDAS-D.</span></div>
+        <div class="grid g3">
+          <label class="field"><span>RBT12 (R$)</span><input type="text" inputmode="decimal" data-vpar="rbt12" value="${vazio(mn.rbt12) ? '' : h(U.fmt(+mn.rbt12, 2))}" placeholder="${p.sug.valor === null ? 'informe' : h(U.fmt(p.sug.valor, 2))}"></label>
+          <label class="field"><span>Alíquota efetiva (%)</span><input type="text" inputmode="decimal" data-vpar="aliq" value="${vazio(mn.aliq) ? '' : h(U.fmt(+mn.aliq, 4))}" placeholder="${h(U.fmt(p.calc.efetiva * 100, 4))}"></label>
+          <label class="field"><span>ICMS na partilha (%)</span><input type="text" inputmode="decimal" data-vpar="pIcms" value="${vazio(mn.pIcms) ? '' : h(U.fmt(+mn.pIcms, 2))}" placeholder="${h(U.fmt(p.calc.pIcms * 100, 2))}"></label>
+        </div>
+        <div class="small muted">${h(p.sug.nota)} Faixa ${p.calc.faixa}: alíquota nominal ${U.fmt(p.calc.nominal * 100, 2)}%, dedução ${U.brl(p.calc.deducao)}. Em uso: efetiva ${U.pct(p.aliq * 100, 4)} × ICMS ${U.pct(p.pIcms * 100, 2)} = ${U.pct(p.fator * 100, 4)} sobre a receita.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Produtos vendidos</h3><span class="pill neutro">${an.produtos.length}</span>
+          <div class="sp chips">${FILTROS_VENDAS.map(([k, n]) => `<button type="button" class="chip ${App.ui.vendas.sit === k ? 'on' : ''}" data-act="vendas-filtro" data-v="${k}">${n} (${an.produtos.filter(x => passaFiltroVendas(x, k)).length})</button>`).join('')}</div></div>
+        <div class="card-pad" style="padding-top:0"><input type="search" id="vendas-q" style="width:100%" value="${h(App.ui.vendas.q)}" placeholder="Buscar por produto, código, GTIN ou NCM…" aria-label="Buscar produto"></div>
+        <div id="vendas-results"></div>
+      </div>
+    </div>`;
+  }
+
+  function renderVendasResults() {
+    const box = $('#vendas-results'), an = App.vendasAn;
+    if (!box || !an) return;
+    const S = V().SIT, f = App.ui.vendas, q = U.norm(f.q), qd = U.digits(f.q);
+    const rows = an.produtos.filter(p => passaFiltroVendas(p, f.sit) && (!q || U.norm(p.nome + ' ' + p.cod).includes(q) || (qd.length >= 4 && (U.digits(p.ean).includes(qd) || p.ncm.startsWith(qd)))));
+    const lim = 300;
+    box.innerHTML = `<div class="table-wrap"><table class="data"><thead><tr><th>Situação</th><th>Produto</th><th>NCM</th><th>CEST</th><th>CSOSN</th><th class="num">Receita</th><th class="num">ICMS a mais</th><th>Ajuste</th></tr></thead><tbody>
+      ${rows.slice(0, lim).map(p => {
+        const s = S[p.sit], icms = (p.sit === 'st_cobrado' || p.sit === 'st_manual' || p.sit === 'st_conferir') ? U.round2((p.liq - p.liqJa) * an.param.fator) : 0;
+        return `<tr><td><span class="pill ${s.cls}">${h(s.nome)}</span>${p.notas.length ? `<div class="sub">NF ${h(p.notas.slice(0, 6).join(', '))}${p.notas.length > 6 ? '…' : ''}</div>` : ''}</td>
+          <td class="desc"><b class="small">${h(p.nome)}</b><div class="sub">Cód. ${h(p.cod)}${U.digits(p.ean).length >= 8 ? ' · GTIN ' + h(p.ean) : ''} · ${p.nNFs} NF</div><div class="sub">${h(p.obs)}</div></td>
+          <td class="small nowrap">${h(U.fmtNCM(p.ncm))}</td>
+          <td class="small"><input type="text" class="sm" style="width:92px" data-vcest="${h(p.cod)}" value="${h(U.fmtCEST(p.cestAjuste))}" placeholder="${h(U.fmtCEST(p.cest) || (s.st ? 'conferir' : ''))}" title="${h(p.descCest || (p.cands.length ? p.cands.map(e => U.fmtCEST(e.cest) + ' ' + e.desc).slice(0, 6).join('\n') : ''))}" aria-label="CEST"></td>
+          <td class="small nowrap">${h(p.csts.join(' / '))}${s.st && p.sit !== 'st_ja' ? '<div class="sub">→ 500</div>' : ''}</td>
+          <td class="num">${U.brl(p.liq)}${p.liqJa ? `<div class="sub">já ST ${U.brl(p.liqJa)}</div>` : ''}</td>
+          <td class="num">${icms ? U.brl(icms) : '<span class="sub">—</span>'}</td>
+          <td><select data-vaj="${h(p.cod)}" aria-label="Ajuste da situação">${V().AJUSTES.map(([v, n]) => opt(v, n, p.ajuste)).join('')}</select></td></tr>`;
+      }).join('') || '<tr class="empty-row"><td colspan="8">Nenhum produto no filtro.</td></tr>'}</tbody></table></div>
+      ${rows.length > lim ? `<div class="card-pad small muted">Mostrando ${lim} de ${rows.length} produtos — use a busca ou os filtros. O Excel traz todos.</div>` : ''}`;
+  }
+  const vendasBuscaDebounced = U.debounce(v => { App.ui.vendas.q = v; savePrefs(); renderVendasResults(); }, 200);
+
+  function setVendasParam(t) {
+    const an = App.vendasAn; if (!an) return;
+    const key = `${an.company.id}|${an.ref}`;
+    const ps = App.state.vendas.params;
+    const o = Object.assign({}, ps[key]);
+    const raw = t.value.trim();
+    const v = raw ? parseFloat(raw.replace(/\./g, '').replace(',', '.')) : NaN;
+    if (isNaN(v)) delete o[t.dataset.vpar]; else o[t.dataset.vpar] = v;
+    if (Object.keys(o).length) ps[key] = o; else delete ps[key];
+    commit();
+  }
+  function setVendasAjuste(t, campo) {
+    const an = App.vendasAn; if (!an) return;
+    const aj = App.state.vendas.ajustes;
+    const cid = an.company.id, cod = t.dataset[campo === 'sit' ? 'vaj' : 'vcest'];
+    const porEmp = aj[cid] || (aj[cid] = {});
+    const o = Object.assign({}, porEmp[cod]);
+    const v = campo === 'cest' ? U.digits(t.value) : t.value;
+    if (v) o[campo] = v; else delete o[campo];
+    if (Object.keys(o).length) porEmp[cod] = o; else delete porEmp[cod];
+    commit();
   }
 
   function newCompany(o = {}) {
@@ -390,6 +512,18 @@
     return c;
   }
 
+  /** Empresa dos relatórios da Makro: código do escritório, razão social/fantasia no nome do arquivo ou a empresa selecionada no escopo. */
+  function companyForMakro(dt) {
+    const cs = App.state.companies;
+    if (dt.codEscritorio) { const c = cs.find(x => x.codEscritorio && x.codEscritorio === dt.codEscritorio); if (c) return c; }
+    const n = U.normKey(dt.empresaNome);
+    if (n) {
+      const c = cs.find(x => [x.razaoSocial, x.nomeFantasia].some(s => { const k = U.normKey(s); return k && (k === n || (k.length >= 6 && (n.includes(k) || k.includes(n)))); }));
+      if (c) return c;
+    }
+    return cs.find(x => x.id === App.ui.empresa) || (cs.length === 1 ? cs[0] : null);
+  }
+
   function addDoc(d, res) {
     if (d.kind === 'desconhecido' || d.kind === 'erro') { res.erros.push(`${d.fileName}: ${(d.warnings || []).join(' ')}`); return null; }
     if (App.state.docs.some(x => x.hash === d.hash && (x.part || 0) === (d.part || 0))) { res.dup.push(d.fileName); return null; }
@@ -400,6 +534,16 @@
       doc.link = { companyId: c.id };
       const old = App.state.docs.filter(x => x.kind === 'previa' && x.link && x.link.companyId === c.id && x.data.referencia === doc.data.referencia && x.data.tributoCodigo === doc.data.tributoCodigo);
       if (old.length) { App.state.docs = App.state.docs.filter(x => !old.includes(x)); res.subst.push(doc.fileName); }
+    }
+    if (doc.kind === 'saidas' || doc.kind === 'simples') {
+      const c = companyForMakro(doc.data);
+      doc.link = { companyId: c ? c.id : '', referencia: doc.data.referencia || '' };
+      if (!c) doc.warnings = (doc.warnings || []).concat('Empresa não identificada pelo nome do arquivo: defina-a no vínculo do documento (ícone de lápis).');
+      else {
+        if (doc.data.codEscritorio && !c.codEscritorio) c.codEscritorio = doc.data.codEscritorio;
+        const old = App.state.docs.filter(x => x.kind === doc.kind && x.link && x.link.companyId === c.id && (x.link.referencia || x.data.referencia) === doc.link.referencia);
+        if (old.length) { App.state.docs = App.state.docs.filter(x => !old.includes(x)); res.subst.push(doc.fileName); }
+      }
     }
     App.state.docs.push(doc);
     res.ok.push(doc.fileName);
@@ -466,7 +610,12 @@
     const ch = d.kind === 'itens' ? m.chargesById.get(m.docCharge.get(d.id)) : null;
     const lk = d.link || {};
     const body = d.kind === 'previa' ? `
-      <label class="field"><span>Empresa</span><select id="lk-emp">${comps.map(c => opt(c.id, nomeCurto(c), lk.companyId)).join('')}</select></label>` : `
+      <label class="field"><span>Empresa</span><select id="lk-emp">${comps.map(c => opt(c.id, nomeCurto(c), lk.companyId)).join('')}</select></label>` : (d.kind === 'saidas' || d.kind === 'simples') ? `
+      <div class="grid g2">
+        <label class="field"><span>Empresa</span><select id="lk-emp">${opt('', '—', lk.companyId || '')}${comps.map(c => opt(c.id, nomeCurto(c), lk.companyId)).join('')}</select></label>
+        <label class="field"><span>Referência</span><input type="month" id="lk-ref" value="${h(lk.referencia || d.data.referencia || '')}"></label>
+      </div>
+      <div class="small muted">Nome no arquivo: ${h(d.data.empresaNome || '—')}${d.data.codEscritorio ? ` · código ${h(d.data.codEscritorio)} no sistema contábil` : ''}</div>` : `
       <div class="callout">Normalmente o vínculo é automático pelo número da NF e pelo relatório de prévia. Ajuste só se o documento ficou sem prévia ou em outra empresa.</div>
       <div class="grid g2">
         <label class="field"><span>Empresa</span><select id="lk-emp">${opt('', 'Automático', '')}${comps.map(c => opt(c.id, nomeCurto(c), lk.companyId)).join('')}</select></label>
@@ -484,6 +633,11 @@
     const d = App.state.docs.find(x => x.id === docId);
     if (!d) return;
     if (d.kind === 'previa') d.link = { companyId: $('#lk-emp').value };
+    else if (d.kind === 'saidas' || d.kind === 'simples') {
+      d.link = { companyId: $('#lk-emp').value, referencia: U.refKey($('#lk-ref').value) || d.data.referencia };
+      const c = App.state.companies.find(x => x.id === d.link.companyId);
+      if (c && d.data.codEscritorio && !c.codEscritorio) c.codEscritorio = d.data.codEscritorio;
+    }
     else d.link = { companyId: $('#lk-emp').value, referencia: U.refKey($('#lk-ref').value), tipo: $('#lk-tipo').value, numero: U.digits($('#lk-nf').value), cnpjRemetente: U.digits($('#lk-cnpj').value) };
     closeDrawer();
     commit();
@@ -1504,6 +1658,8 @@
         <p>Pela Resolução SEFAZ nº 3.033/2019, o optante pelo Simples Nacional pede a revisão eletrônica no e-Fazenda (módulo Informações Fiscais). É <b>um pedido por mês de referência e por tributo</b> — por isso o sistema consolida tudo antes. Até o vencimento, as NFs contestadas ficam desvinculadas até a decisão (15 dias úteis). Depois, use o e-SAP (nova revisão, reconsideração ou restituição — Res. SEFAZ nº 3.426/2025).</p>
         <h3>Dica para o Simples Nacional</h3>
         <p>Os produtos cujo ICMS-ST foi pago devem sair com <b>CSOSN 500</b> e ter a receita segregada no PGDAS-D como "com substituição tributária" (LC nº 123/2006, art. 18, § 4º-A, I) — assim o ICMS não é pago de novo no DAS. Use o botão <b>Produtos c/ ST</b> na tela de Revisão para gerar a lista.</p>
+        <h3>Vendas × ST</h3>
+        <p>Importe o <b>Registro de Saídas Detalhado</b> e o <b>Controle de Cálculo do Simples Nacional</b> (Excel do sistema contábil Makro) de cada empresa e mês. A empresa é reconhecida pelo nome do arquivo (ex.: "575 - RAZÃO SOCIAL - RegSaidasDetalhado 10 2026"). Na tela <b>Vendas × ST</b>, o app cruza cada produto vendido com as memórias de ICMS-ST e de Equalização da empresa e com o Subanexo I: ST cobrado na entrada, a conferir, já emitido como ST, Equalização, preparado na loja ou fora da ST. Ajuste a situação ou o CEST de cada produto quando precisar. A alíquota do DAS vem do Anexo I pela RBT12 (proporcional no início de atividade); confira com o extrato do PGDAS-D. O Excel traz o resumo do ICMS pago a mais, o cadastro para o ERP (CEST, CSOSN 500, CFOP 5405) e as vendas nota a nota.</p>
         <div class="callout warn">Ferramenta de apoio. Os textos de fundamentação são modelos: confira a redação vigente das normas, as MVAs do Subanexo I do RICMS/MS e os documentos antes de protocolar.</div>
       </div>
       <div class="card">
@@ -1689,6 +1845,16 @@
       catch (e) { toast('Não foi possível gerar a planilha: ' + h(e.message), 'err'); }
     },
     'export-sos': () => exportarSOS(),
+    'vendas-filtro': el => {
+      App.ui.vendas.sit = el.dataset.v; savePrefs();
+      el.parentElement.querySelectorAll('[data-act="vendas-filtro"]').forEach(b => b.classList.toggle('on', b === el));
+      renderVendasResults();
+    },
+    'export-vendas': () => {
+      const an = App.vendasAn; if (!an) return;
+      try { const r = V().exportar(an); toast(`Relatório gerado: ${r.produtos} produto(s) e ${r.linhas} item(ns) de venda a ajustar.`, 'ok'); }
+      catch (e) { console.error(e); toast('Não foi possível gerar a planilha: ' + h(e.message), 'err'); }
+    },
     'toggle-menu': () => {
       const recolher = !$('.app').classList.contains('menu-recolhido');
       aplicarMenu(recolher);
@@ -1868,6 +2034,9 @@
       return commit({ render: false });
     }
     if (t.matches('[data-req]')) return onReqChange(t);
+    if (t.matches('[data-vpar]')) return setVendasParam(t);
+    if (t.matches('[data-vaj]')) return setVendasAjuste(t, 'sit');
+    if (t.matches('[data-vcest]')) return setVendasAjuste(t, 'cest');
     if (t.id === 'scope-empresa') { App.ui.empresa = t.value; App.sel.clear(); savePrefs(); return renderAll(); }
     if (t.id === 'scope-ref') { App.ui.ref = t.value; App.sel.clear(); savePrefs(); return renderAll(); }
   }
@@ -1878,6 +2047,7 @@
     if (t.matches('[data-f]') && (t.type === 'search' || t.type === 'text')) setFilterDebounced(t);
     if (t.id === 'sub-q') subBuscaDebounced(t.value);
     if (t.matches('[data-mf]')) filtroColunaDebounced(t);
+    if (t.id === 'vendas-q') vendasBuscaDebounced(t.value);
   }
 
   function bind() {
@@ -1921,6 +2091,7 @@
     App.ui.memoria = Object.assign(defaultUI().memoria, App.ui.memoria || {});
     if (!App.ui.memoria.filtros || typeof App.ui.memoria.filtros !== 'object') App.ui.memoria.filtros = {};
     App.ui.docs = { kind: '' };
+    App.ui.vendas = Object.assign(defaultUI().vendas, App.ui.vendas || {});
     aplicarMenu(ST.prefGet('menu', '') === 'recolhido');
     App.state = await ST.load();
     recompute();
