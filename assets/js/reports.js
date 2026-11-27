@@ -114,7 +114,7 @@
     const excl = new Map(), linhasPed = [];
     ped.forEach(g => {
       g.desvincular.forEach(n => { excl.set(n.chargeId, n.revisar); linhasPed.push({ numero: n.numero, item: '(NF inteira)', ncm: '', cest: '', icms: n.icmsNF, excluir: n.revisar, motivo: n.descricao }); });
-      g.alterar.forEach(n => { excl.set(n.chargeId, n.revisar); n.itens.forEach(i => { const it = model.itemsById.get(i.itemId) || {}; linhasPed.push({ numero: n.numero, item: i.descricaoItem, ncm: i.ncm, cest: it.cest || '', icms: i.icms, excluir: i.revisar, motivo: i.descricao.replace(/\s*Excluir \d.*$/, '') }); }); });
+      g.alterar.forEach(n => { excl.set(n.chargeId, n.revisar); n.itens.forEach(i => { const it = model.itemsById.get(i.itemId) || {}; linhasPed.push({ numero: n.numero, item: i.descricaoItem, ncm: i.ncm, cest: it.cest || '', icms: i.icms, excluir: i.revisar, motivo: i.descricao }); }); });
     });
     const totalRev = U.round2(U.sum([...excl.values()]));
     const charges = model.charges.filter(ch => ch.companyId === opts.companyId && ch.referencia === opts.referencia && ch.tipo === opts.tipo);
@@ -251,10 +251,7 @@
   }
   const semPontoFinal = s => String(s || '').trim().replace(/[.;]+$/, '');
   /** Texto só com letras sem acento, números e espaços (campo Descrição do e-Fazenda). */
-  const semEspeciais = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
-  /** 381.74 → "381 reais e 74 centavos" (sem vírgula, ponto ou cifrão). */
-  const valorSemSimbolos = v => { const c = Math.round((+v || 0) * 100), r = Math.floor(c / 100), ct = c % 100; return `${r} ${r === 1 ? 'real' : 'reais'}${ct ? ` e ${ct} ${ct === 1 ? 'centavo' : 'centavos'}` : ''}`; };
-  /** Justificativa curta, escrita para a SEFAZ, de cada tipo de achado (com a norma principal). */
+  const semEspeciais = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();  /** Justificativa curta, escrita para a SEFAZ, de cada tipo de achado (com a norma principal). */
   // com o nº do DAEMS (dae), o texto informa o recolhimento do que continua devido — cabe nos 199 caracteres
   const caber = (comCit, semCit) => comCit.length <= LIM_JUST - 1 ? comCit : semCit;
   const CURTO = {
@@ -290,9 +287,8 @@
     const ord = fs.slice().sort((a, b) => b.valorRevisar - a.valorRevisar);
     const principal = ord[0];
     const motivoKey = MOTIVO_DA_REGRA[principal.ruleId] || 'OUTROS';
-    // o campo Descrição do e-Fazenda não aceita caracteres especiais: só letras sem acento, números e espaços
-    const excl = `Excluir ${valorSemSimbolos(valor)}`;
-    const descricao = `${cortar(semEspeciais(`${principal.regra}${ord.length > 1 ? ` e mais ${ord.length - 1}` : ''}`), LIM_DESC - excl.length - 1)} ${excl}`;
+    // o campo Descrição do e-Fazenda não aceita caracteres especiais: só letras sem acento, números e espaços (sem o valor, que a SEFAZ revisa)
+    const descricao = cortar(semEspeciais(`${principal.regra}${ord.length > 1 ? ` e mais ${ord.length - 1}` : ''}`), LIM_DESC);
     // junta achados inteiros enquanto couberem; só o primeiro pode ser cortado. O texto com o nº do DAEMS vem primeiro.
     const D = global.RST_DAEMS;
     const textos = U.uniq(ord.map(f => curto(f, D && daems ? D.numeroDo(daems, f) : '')));
