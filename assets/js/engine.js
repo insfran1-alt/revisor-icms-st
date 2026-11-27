@@ -532,6 +532,8 @@
       const nf = nfs.get(ch.nfKey);
       const me = meStatus(company, ch.referencia, ch.dataEmissao);
       const industrial = company ? (company.industrial === true || (company.industrial !== false && company.cnaePrincipal && U.cnaeIndustrial(company.cnaePrincipal.codigo))) : false;
+      // CNAE industrial só entre os secundários (ex.: comércio de doces + fabricação de confeitaria): indício, com força moderada
+      const indSec = company && !industrial && company.industrial !== false ? (company.cnaesSecundarios || []).find(c => c && U.cnaeIndustrial(c.codigo)) || null : null;
       const alimentacao = company ? [company.cnaePrincipal].concat(company.cnaesSecundarios || []).filter(Boolean).find(c => U.cnaeAlimentacao(c.codigo)) : null;
 
       // Itens repetidos na mesma memória. Sem o XML, se as bases da NF (ST + EQ, sem frete) cabem no valor da nota,
@@ -641,11 +643,11 @@
             const isento = me.status === 'isenta' || me.status === 'mei';
             const devido = isento ? 0 : U.round2((it.custoFinal || 0) * Math.max(0, aIntra - (it.aliqInter || 7)) / 100);
             const rev = U.round2((it.icms || 0) - devido);
-            const cnaeTxt = industrial ? `atividade industrial — CNAE ${company.cnaePrincipal.codigo}` : alimentacao ? `CNAE ${alimentacao.codigo} — ${alimentacao.descricao}` : 'conforme atividade do estabelecimento';
+            const cnaeTxt = industrial ? `atividade industrial — CNAE ${company.cnaePrincipal.codigo}` : indSec ? `atividade de fabricação — CNAE secundário ${indSec.codigo}${indSec.descricao ? ' — ' + indSec.descricao : ''}` : alimentacao ? `CNAE ${alimentacao.codigo} — ${alimentacao.descricao}` : 'conforme atividade do estabelecimento';
             if (rev > tol) add('ST_INSUMO', ch, it, { revisar: rev, devido }, {
               resumo: `${it.dest.origem === 'usuario' ? 'Destinação informada' : `Sugestão pela descrição (${it.dest.palavra})`}: insumo. Devido estimado (Equalização) ${brl(devido)}.`,
-              fund: `O item ${itTxt(it)} da ${nfTxt(ch)} é insumo utilizado no preparo dos produtos vendidos pelo estabelecimento (${cnaeTxt}) e não será revendido no estado em que foi adquirido. Sem a operação subsequente presumida, não subsiste a exigência do ICMS-ST com MVA (CF/88, art. 150, § 7º; LC nº 87/1996, art. 10)${industrial ? '; tratando-se de estabelecimento industrial, o regime não se aplica às mercadorias destinadas à industrialização (Convênio ICMS 142/2018, cláusula nona, III; Decreto nº 15.055/2018, art. 3º, § 1º, I, e § 2º)' : ''}. Para o optante do Simples Nacional, a aquisição interestadual destinada à comercialização ou industrialização sujeita-se à Equalização, calculada sem MVA (Decreto nº 15.055/2018, arts. 3º a 5º)${isento ? ', da qual a empresa está isenta (Decreto nº 16.177/2023)' : ''}. Valor devido estimado: ${brl(devido)}; requer-se a revisão da cobrança em ${brl(rev)}.`
-            }, { forca: industrial ? 'forte' : 'moderada', base: industrial ? ['CF150_7', 'LC87_10', 'CONV142_9', 'DEC15055_IND', 'DEC15055_5', 'CTN165'] : undefined });
+              fund: `O item ${itTxt(it)} da ${nfTxt(ch)} é insumo utilizado no preparo dos produtos vendidos pelo estabelecimento (${cnaeTxt}) e não será revendido no estado em que foi adquirido. Sem a operação subsequente presumida, não subsiste a exigência do ICMS-ST com MVA (CF/88, art. 150, § 7º; LC nº 87/1996, art. 10)${industrial ? '; tratando-se de estabelecimento industrial, o regime não se aplica às mercadorias destinadas à industrialização (Convênio ICMS 142/2018, cláusula nona, III; Decreto nº 15.055/2018, art. 3º, § 1º, I, e § 2º)' : indSec ? '; o estabelecimento também exerce atividade de fabricação, e o regime não se aplica às mercadorias empregadas como matéria-prima em processo de industrialização (Convênio ICMS 142/2018, cláusula nona, III)' : ''}. Para o optante do Simples Nacional, a aquisição interestadual destinada à comercialização ou industrialização sujeita-se à Equalização, calculada sem MVA (Decreto nº 15.055/2018, arts. 3º a 5º)${isento ? ', da qual a empresa está isenta (Decreto nº 16.177/2023)' : ''}. Valor devido estimado: ${brl(devido)}; requer-se a revisão da cobrança em ${brl(rev)}.`
+            }, { forca: industrial ? 'forte' : 'moderada', base: industrial ? ['CF150_7', 'LC87_10', 'CONV142_9', 'DEC15055_IND', 'DEC15055_5', 'CTN165'] : indSec ? ['CF150_7', 'LC87_10', 'CONV142_9', 'DEC15055_3', 'DEC15055_5', 'CTN165'] : undefined });
           }
           // Despesas acessórias elevadas
           if ((it.outros || 0) > 50 && (it.valorTotal || 0) > 0 && (it.outros / it.valorTotal) * 100 > (+S.outrosLimitePct || 30)) {

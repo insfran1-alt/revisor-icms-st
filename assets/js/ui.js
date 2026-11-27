@@ -68,7 +68,8 @@
   }
 
   /* ---------- Helpers ---------- */
-  const nomeCurto = c => c ? (c.nomeFantasia || c.razaoSocial || 'Empresa sem nome') : 'Sem empresa';
+  // "apelido" é o nome que o usuário dá à empresa dentro do app (para diferenciar empresas de mesmo nome fantasia)
+  const nomeCurto = c => c ? (String(c.apelido || '').trim() || c.nomeFantasia || c.razaoSocial || 'Empresa sem nome') : 'Sem empresa';
   const inScope = x => (!App.ui.empresa || x.companyId === App.ui.empresa) && (!App.ui.ref || x.referencia === App.ui.ref);
   const tipoPill = (tipo, cod) => `<span class="pill ${tipo === 'ST' ? 'st' : tipo === 'EQ' ? 'eq' : 'neutro'}">${tipo === 'ST' ? 'ST' : tipo === 'EQ' ? 'EQ' : h(tipo)}${cod ? ' · ' + h(cod) : ''}</span>`;
   const forcaPill = f => `<span class="pill ${f}"><span class="dot ${f}"></span>${L.FORCAS[f].nome}</span>`;
@@ -1490,12 +1491,13 @@
       const ini = nomeCurto(c).split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
       const cnaes = [c.cnaePrincipal].concat(c.cnaesSecundarios || []).filter(Boolean);
       const ind = c.industrial === true || (c.industrial !== false && c.cnaePrincipal && U.cnaeIndustrial(c.cnaePrincipal.codigo));
+      const indSec = !ind && c.industrial !== false && (c.cnaesSecundarios || []).some(x => x && U.cnaeIndustrial(x.codigo));
       const ali = cnaes.some(x => U.cnaeAlimentacao(x.codigo));
       const me = E.meStatus(c, App.ui.ref || App.model.refs[0] || '', '');
       const field = (k, lb, val, type = 'text', extra = '') => `<label class="field"><span>${h(lb)}</span><input type="${type}" data-comp="${k}" data-cid="${h(c.id)}" value="${h(val ?? '')}" ${extra}></label>`;
       return `<div class="card company">
         <div class="top"><div class="avatar">${h(ini || '?')}</div><div style="min-width:0"><h3>${h(nomeCurto(c))}</h3><div class="sub">${h(c.razaoSocial || '')}</div>
-          <div class="row" style="margin-top:6px"><span class="pill ok">Simples Nacional</span>${c.porte ? `<span class="pill neutro">${h(c.porte)}</span>` : '<span class="pill moderada">porte?</span>'}${ind ? '<span class="pill atencao">Industrial</span>' : ''}${ali ? '<span class="pill neutro">Alimentação</span>' : ''}${me.status === 'isenta' ? '<span class="pill ok">Isenta EQ (Dec. 16.177)</span>' : ''}</div></div></div>
+          <div class="row" style="margin-top:6px"><span class="pill ok">Simples Nacional</span>${c.porte ? `<span class="pill neutro">${h(c.porte)}</span>` : '<span class="pill moderada">porte?</span>'}${ind ? '<span class="pill atencao">Industrial</span>' : indSec ? '<span class="pill moderada" title="Há CNAE industrial secundário: os insumos são revisados como industrialização, com força moderada. Marque &quot;Sim&quot; em Estabelecimento industrial se a produção for a atividade preponderante.">Industrial (CNAE secundário)</span>' : ''}${ali ? '<span class="pill neutro">Alimentação</span>' : ''}${me.status === 'isenta' ? '<span class="pill ok">Isenta EQ (Dec. 16.177)</span>' : ''}</div></div></div>
         <div class="meta">
           <div><span>CNPJ</span>${h(U.fmtCNPJ(c.cnpj) || '—')}</div><div><span>Inscrição estadual</span>${h(c.ie || '—')}</div>
           <div><span>Município/UF</span>${h([c.municipio, c.uf].filter(Boolean).join('/') || '—')}</div><div><span>Abertura</span>${h(U.brDate(c.dataAbertura) || '—')}</div>
@@ -1504,6 +1506,7 @@
         <div class="cnaes"><div class="small strong">Atividades (CNAE)${cnaes.length ? '' : ' — <span class="muted">importe o cartão CNPJ</span>'}</div>
           ${cnaes.map((x, i) => `<div class="cnae ${i === 0 ? 'principal' : ''}"><code>${h(x.codigo)}</code><span>${h(x.descricao)}${i === 0 ? ' <span class="sub">(principal)</span>' : ''}</span></div>`).join('')}</div>
         <div class="edit">
+          ${field('apelido', 'Nome no app (para diferenciar)', c.apelido, 'text', `placeholder="${h(c.nomeFantasia || c.razaoSocial || 'ex.: MULTICOISAS - LOJA CENTRO')}"`)}
           ${c.fonte !== 'cartao' ? field('razaoSocial', 'Razão social', c.razaoSocial) + field('nomeFantasia', 'Nome fantasia', c.nomeFantasia) + field('cnpj', 'CNPJ', U.fmtCNPJ(c.cnpj)) : ''}
           ${field('ie', 'Inscrição estadual', c.ie)}
           <label class="field"><span>Porte</span><select data-comp="porte" data-cid="${h(c.id)}">${opt('', '—', c.porte)}${opt('ME', 'ME', c.porte)}${opt('EPP', 'EPP', c.porte)}${opt('MEI', 'MEI', c.porte)}${opt('DEMAIS', 'Demais', c.porte)}</select></label>
