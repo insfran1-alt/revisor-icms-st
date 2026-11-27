@@ -114,7 +114,7 @@
     const excl = new Map(), linhasPed = [];
     ped.forEach(g => {
       g.desvincular.forEach(n => { excl.set(n.chargeId, n.revisar); linhasPed.push({ numero: n.numero, item: '(NF inteira)', ncm: '', cest: '', icms: n.icmsNF, excluir: n.revisar, motivo: n.descricao }); });
-      g.alterar.forEach(n => { excl.set(n.chargeId, n.revisar); n.itens.forEach(i => { const it = model.itemsById.get(i.itemId) || {}; linhasPed.push({ numero: n.numero, item: i.descricaoItem, ncm: i.ncm, cest: it.cest || '', icms: i.icms, excluir: i.revisar, motivo: i.descricao.replace(/\.\s*Excluir R\$.*$/, '') }); }); });
+      g.alterar.forEach(n => { excl.set(n.chargeId, n.revisar); n.itens.forEach(i => { const it = model.itemsById.get(i.itemId) || {}; linhasPed.push({ numero: n.numero, item: i.descricaoItem, ncm: i.ncm, cest: it.cest || '', icms: i.icms, excluir: i.revisar, motivo: i.descricao.replace(/\s*Excluir \d.*$/, '') }); }); });
     });
     const totalRev = U.round2(U.sum([...excl.values()]));
     const charges = model.charges.filter(ch => ch.companyId === opts.companyId && ch.referencia === opts.referencia && ch.tipo === opts.tipo);
@@ -143,7 +143,7 @@
     const D = global.RST_DAEMS;
     const dev = D && opts.settings ? D.apurar(model, fs, opts.settings, opts.daems || {}) : [];
     const secDev = dev.length ? `<h3>1.2. Valores que continuam devidos e seu recolhimento</h3>
-      <p>Sobre os itens revisados permanece devido o imposto abaixo, ${dev.every(g => g.ok) ? 'já recolhido nos DAEMS indicados' : 'a ser recolhido em DAEMS próprio'}. A memória de cálculo, item a item, segue anexa.</p>
+      <p>Sobre os itens revisados permanece devido o imposto abaixo, ${dev.every(g => g.ok) ? 'que será recolhido nos DAEMS indicados' : 'que será recolhido em DAEMS próprio'}. A memória de cálculo, item a item, segue anexa.</p>
       <table><thead><tr><th>Imposto</th><th class="num">Itens</th><th class="num">Valor devido</th><th>Nº do DAEMS</th><th class="num">Valor do DAEMS</th><th>Fundamento</th></tr></thead><tbody>
       ${dev.map(g => `<tr><td>${e(D.TIPOS[g.tipo].nome)}</td><td class="num">${g.linhas.length}</td><td class="num">${U.brl(g.total)}</td><td>${e(g.daems.numero || '(a informar)')}</td><td class="num">${g.daems.valor !== '' ? U.brl(+g.daems.valor) : ''}</td><td class="small">${e(D.TIPOS[g.tipo].base)}</td></tr>`).join('')}</tbody></table>` : '';
     const anexoDev = dev.length ? `<div class="anexo"><h2>Anexo — Memória de cálculo do DIFAL e da Equalização</h2>${dev.map(g => `<h3>${e(D.TIPOS[g.tipo].nome)}${g.daems.numero ? ` — DAEMS nº ${e(g.daems.numero)}` : ''}</h3>
@@ -170,7 +170,7 @@
       <p>Diante do exposto, requer:</p>
       <p>a) ${integrais.length ? `a desvinculação, da cobrança do ${e(trib)} da referência ${e(ref)}, das NF ${e(integrais.map(x => x.ch.numero).join(', '))}` : ''}${integrais.length && parciais.length ? '; e ' : ''}${parciais.length ? `a revisão parcial das NF ${e(parciais.map(x => x.ch.numero).join(', '))}, com a exclusão dos itens e valores relacionados no item 1.1` : ''}, reduzindo-se a exigência em ${U.brl(totalRev)};</p>
       <p>b) caso algum valor já tenha sido recolhido, a restituição do indébito, devidamente atualizado (CTN, art. 165, I; Resolução SEFAZ nº 3.426/2025);</p>
-      ${dev.length ? `<p>c) o reconhecimento de que o imposto que permanece devido sobre os itens revisados (${e(dev.map(g => `${D.TIPOS[g.tipo].curto} de ${U.brl(g.total)}`).join(' e '))}) ${dev.every(g => g.ok) ? `foi recolhido no(s) DAEMS nº ${e(dev.map(g => g.daems.numero).join(', '))}` : 'será recolhido em DAEMS próprio'}, conforme memória de cálculo anexa;</p>` : ''}
+      ${dev.length ? `<p>c) o reconhecimento de que o imposto que permanece devido sobre os itens revisados (${e(dev.map(g => `${D.TIPOS[g.tipo].curto} de ${U.brl(g.total)}`).join(' e '))}) ${dev.every(g => g.ok) ? `será recolhido no(s) DAEMS nº ${e(dev.map(g => g.daems.numero).join(', '))}` : 'será recolhido em DAEMS próprio'}, conforme memória de cálculo anexa;</p>` : ''}
       <p>${dev.length ? 'd' : 'c'}) a juntada dos documentos anexos e, se necessário, a intimação para apresentação de documentos complementares (Resolução SEFAZ nº 3.033/2019, art. 1º, § 2º).</p>
       <h2>4. Documentos anexos</h2>
       <ul>${docs.map(d => `<li>${e(d)}</li>`).join('')}<li>Relatório de Prévia com Cálculos ICMS da referência ${e(ref)} e respectivas memórias de cálculo.</li></ul>
@@ -250,23 +250,30 @@
     return (i > n * 0.6 ? c.slice(0, i) : c).replace(/[\s,;:–-]+$/, '');
   }
   const semPontoFinal = s => String(s || '').trim().replace(/[.;]+$/, '');
+  /** Texto só com letras sem acento, números e espaços (campo Descrição do e-Fazenda). */
+  const semEspeciais = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  /** 381.74 → "381 reais e 74 centavos" (sem vírgula, ponto ou cifrão). */
+  const valorSemSimbolos = v => { const c = Math.round((+v || 0) * 100), r = Math.floor(c / 100), ct = c % 100; return `${r} ${r === 1 ? 'real' : 'reais'}${ct ? ` e ${ct} ${ct === 1 ? 'centavo' : 'centavos'}` : ''}`; };
   /** Justificativa curta, escrita para a SEFAZ, de cada tipo de achado (com a norma principal). */
   // com o nº do DAEMS (dae), o texto informa o recolhimento do que continua devido — cabe nos 199 caracteres
   const caber = (comCit, semCit) => comCit.length <= LIM_JUST - 1 ? comCit : semCit;
   const CURTO = {
     ST_USO: (f, dae) => {
       const dest = /degust|brinde|amostra/i.test(f.resumo) ? 'degustação/brinde' : 'uso e consumo';
-      if (dae && f.valorDevido) { const t = `Mercadoria para ${dest}, não revendida: ST indevida; devido só o DIFAL de ${U.brl(f.valorDevido)}, recolhido no DAEMS ${dae}`; return caber(`${t} (CF art. 150 §7º; LC 87/96 art. 10)`, t); }
-      return `Mercadoria para ${dest}, não revendida: ST indevida${f.valorDevido ? `; devido só o diferencial de alíquotas (${U.brl(f.valorDevido)})` : ''} (CF art. 150 §7º; LC 87/96 art. 10)`;
+      const dev = f.valorDevido ? `; o DIFAL de ${U.brl(f.valorDevido)}, será recolhido ${dae ? `no DAEMS ${dae}` : 'em DAEMS próprio'}` : '';
+      const t = `Mercadoria para ${dest}, não revendida${dev}`;
+      return caber(`${t} (CF art. 150 §7º; LC 87/96 art. 10)`, t);
     },
     ST_INSUMO: (f, dae) => {
-      if (dae && f.valorDevido) { const t = `Insumo do preparo de alimentos, não revendido: ST indevida; devida só a Equalização de ${U.brl(f.valorDevido)}, recolhida no DAEMS ${dae}`; return caber(`${t} (CF art. 150 §7º; Dec. 15.055/2018)`, t); }
-      return `Insumo usado no preparo de alimentos, não revendido: ST indevida${f.valorDevido ? `; devida só a Equalização (${U.brl(f.valorDevido)})` : ''} (CF art. 150 §7º; Dec. 15.055/2018)`;
+      const dev = f.valorDevido ? `; a Equalização de ${U.brl(f.valorDevido)}, será recolhida ${dae ? `no DAEMS ${dae}` : 'em DAEMS próprio'}` : '';
+      const t = `Insumo usado no preparo de alimentos, não revendido${dev}`;
+      return caber(`${t} (CF art. 150 §7º; Dec. 15.055/2018)`, t);
     },
     ST_SEM_CEST: () => 'NF sem CEST e produto que não corresponde a item do Subanexo I do Anexo III do RICMS/MS: não sujeito à ST (Conv. ICMS 142/2018, cl. 7ª)',
     ST_FORA_TAB: (f, dae) => {
-      if (dae && f.valorDevido) { const t = `NCM ${U.fmtNCM(f.ncm)} fora do Subanexo I do RICMS/MS: não sujeito à ST; Equalização de ${U.brl(f.valorDevido)} recolhida no DAEMS ${dae}`; return caber(`${t} (Conv. ICMS 142/2018, cl. 7ª)`, t); }
-      return `NCM ${U.fmtNCM(f.ncm)} fora do Subanexo I do Anexo III do RICMS/MS: mercadoria não sujeita à ST (Conv. ICMS 142/2018, cl. 7ª)`;
+      const dev = f.valorDevido ? `; a Equalização de ${U.brl(f.valorDevido)}, será recolhida ${dae ? `no DAEMS ${dae}` : 'em DAEMS próprio'}` : '';
+      const t = `NCM ${U.fmtNCM(f.ncm)} fora do Subanexo I do RICMS/MS${dev}`;
+      return caber(`${t} (Conv. ICMS 142/2018, cl. 7ª)`, t);
     },
     DUP_ST_EQ: () => 'Mesmo item cobrado na ST e na Equalização; a Equalização não se aplica a mercadoria sujeita à ST (Dec. 15.055/2018, art. 3º, §1º, II, a)',
     DUP_ITEM: () => 'Linha repetida na memória de cálculo: o mesmo item foi cobrado mais de uma vez (CTN, art. 165)',
@@ -283,7 +290,9 @@
     const ord = fs.slice().sort((a, b) => b.valorRevisar - a.valorRevisar);
     const principal = ord[0];
     const motivoKey = MOTIVO_DA_REGRA[principal.ruleId] || 'OUTROS';
-    const descricao = cortar(`${principal.regra}${ord.length > 1 ? ` e mais ${ord.length - 1}` : ''}. Excluir ${U.brl(valor)}`, LIM_DESC);
+    // o campo Descrição do e-Fazenda não aceita caracteres especiais: só letras sem acento, números e espaços
+    const excl = `Excluir ${valorSemSimbolos(valor)}`;
+    const descricao = `${cortar(semEspeciais(`${principal.regra}${ord.length > 1 ? ` e mais ${ord.length - 1}` : ''}`), LIM_DESC - excl.length - 1)} ${excl}`;
     // junta achados inteiros enquanto couberem; só o primeiro pode ser cortado. O texto com o nº do DAEMS vem primeiro.
     const D = global.RST_DAEMS;
     const textos = U.uniq(ord.map(f => curto(f, D && daems ? D.numeroDo(daems, f) : '')));
@@ -329,7 +338,7 @@
           const excluir = subst || dae ? icms : liquido;
           const campos = camposPedido(ifs, excluir, daems);
           if (dae) {
-            const extra = `ICMS-ST correto de ${U.brl(residual)} recolhido no DAEMS ${dae}`;
+            const extra = `o ICMS-ST correto de ${U.brl(residual)}, será recolhido no DAEMS ${dae}`;
             const j = semPontoFinal(campos.justificativa);
             campos.justificativa = (j.length + extra.length + 3 <= LIM_JUST ? `${j}; ${extra}` : `${cortar(j.replace(/\s*\([^)]*\)\s*$/, ''), LIM_JUST - extra.length - 3)}; ${extra}`) + '.';
           }
