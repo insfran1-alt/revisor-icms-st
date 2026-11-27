@@ -455,7 +455,31 @@
       if (temGtin(it.gtin)) add(porGtin, U.digits(it.gtin).replace(/^0+/, ''), it);
       add(porNome, U.normKey(it.descricao), it);
     });
-    return { porGtin, porNome };
+    return { porGtin, porNome, add };
+  }
+
+  /** Relatórios sem GTIN (Domínio): liga o item da nota de entrada ao item da memória da SEFAZ da mesma NF
+   * (mesmo NCM; havendo vários, a descrição mais parecida) e devolve, por código do produto, o que se sabe dele. */
+  function conhecimentoPorEntrada(model, companyId, E, kn) {
+    const porCod = new Map();
+    if (!E) return porCod;
+    const porNF = new Map();
+    model.items.filter(i => i.companyId === companyId).forEach(i => { const k = String(+i.numero); const l = porNF.get(k); if (l) l.push(i); else porNF.set(k, [i]); });
+    E.porCod.forEach((ents, cod) => {
+      ents.forEach(e => {
+        const cands = (porNF.get(String(+e.nota.nf)) || []).filter(i => U.digits(i.ncm).slice(0, 8) === e.prod.ncm);
+        if (!cands.length) return;
+        ['ST', 'EQ'].forEach(tipo => {
+          const ct = cands.filter(i => i.tipo === tipo);
+          if (!ct.length) return;
+          let it = ct.find(i => U.normKey(i.descricao) === U.normKey(e.prod.nome));
+          if (!it && ct.length === 1) it = ct[0];
+          if (!it) { const m = melhorCest(e.prod.nome, ct.map(i => ({ desc: i.descricao, cest: i.id, i }))); it = m ? m.i : null; }
+          if (it) kn.add(porCod, cod, it);
+        });
+      });
+    });
+    return porCod;
   }
 
   function analisar(state, model, companyId, ref) {
@@ -469,6 +493,7 @@
     const ajustes = ((state.vendas || {}).ajustes || {})[companyId] || {};
     const sd = docS.data;
     const E = entradasDaEmpresa(state, model, company, ref);
+    const knC = conhecimentoPorEntrada(model, companyId, sd.formato === 'dominio-produtos-nota' ? E : null, kn);
     const nomeForn = s => String(s || '').replace(/[^\p{L}\p{N}& ]+/gu, ' ').trim().split(/\s+/).slice(0, 3).join(' ');
     const nfsTxt = list => { const u = U.uniq(list.map(e => `${e.nota.nf}${e.nota.fornecedor ? ` (${nomeForn(e.nota.fornecedor)}${e.nota.uf ? '/' + e.nota.uf : ''})` : ''}`)); return u.slice(0, 4).join(', ') + (u.length > 4 ? '…' : ''); };
 
@@ -484,14 +509,16 @@
     const produtos = Object.entries(sd.produtos).map(([cod, pr]) => {
       const t = porCod[cod] || { qtd: 0, bruto: 0, desc: 0, liq: 0, liqJa: 0, csts: new Set(), cfops: new Set(), nfs: new Set() };
       const gt = U.digits(pr.ean).length >= 8 ? U.digits(pr.ean) : (/^\d{8,14}$/.test(cod) ? cod : '');
-      const ent = (temGtin(gt) && kn.porGtin.get(gt.replace(/^0+/, ''))) || kn.porNome.get(U.normKey(pr.nome)) || null;
+      const ent = (temGtin(gt) && kn.porGtin.get(gt.replace(/^0+/, ''))) || knC.get(cod) || kn.porNome.get(U.normKey(pr.nome)) || null;
       const ofic = sub && pr.ncm ? global.RST_SUB.buscarItem(sub, pr.cest, pr.ncm) : { cands: [], especificos: [] };
       let sit = 'nao', cest = U.digits(pr.cest), notas = [], obs = '';
       const aj = ajustes[cod] || {};
       if (ent && ent.ST.length) {
         sit = 'st_cobrado'; cest = cest || U.digits(ent.ST[0].cest || ent.ST[0].cestXml);
         notas = U.uniq(ent.ST.map(i => i.numero)).sort((a, b) => +a - +b);
-        obs = `Mesmo ${temGtin(gt) && kn.porGtin.get(gt.replace(/^0+/, '')) ? 'GTIN' : 'produto (descrição)'} cobrado com ICMS-ST nas NFs de entrada indicadas.`;
+        obs = temGtin(gt) && kn.porGtin.get(gt.replace(/^0+/, '')) ? 'Mesmo GTIN cobrado com ICMS-ST nas NFs de entrada indicadas.'
+          : knC.get(cod) === ent ? 'Item da NF de entrada (mesmo NCM e descrição) cobrado com ICMS-ST na memória da SEFAZ.'
+          : 'Mesmo produto (descrição) cobrado com ICMS-ST nas NFs de entrada indicadas.';
       } else if (ent && ent.contest.length) {
         sit = 'contestado'; obs = 'A cobrança de ICMS-ST deste produto está sendo contestada como indevida no app; por coerência, a venda segue tributada no Simples.';
       } else if (ent && ent.EQ.length) {
