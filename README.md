@@ -15,6 +15,8 @@ Ferramenta web para **revisar as cobranças de ICMS-ST (tributo 333) e de ICMS E
 
 ## Como usar
 
+> Novidade: tela **Vendas × ST**, que cruza o Registro de Saídas e o Controle do Simples (Makro) com as cobranças de ST (veja a seção própria abaixo).
+
 1. **Empresas** — importe o **cartão CNPJ** (PDF da Receita). As atividades (CNAE), o porte e a data de abertura ficam salvos e orientam a análise.
 2. **Importar** — arraste de uma vez (várias empresas e meses):
    - **Relatório de Prévia com Cálculos ICMS** (PDF) de cada tributo: 333 – ST Comércio e 349 – Equalização Simples Nacional;
@@ -70,6 +72,26 @@ O app traz a relação das mercadorias sujeitas à ST em MS — **Subanexo I do 
 - **Atualizar:** baixe o Subanexo I no site da SEFAZ/MS, abra no Word e salve como `.docx`. Depois use *Tabelas e regras → Atualizar com nova versão*.
 - **Ajustes:** a sua tabela de MVA, na mesma tela, prevalece sobre a relação.
 
+## Vendas × ST (Registro de Saídas e Controle do Simples)
+
+Mede o ICMS pago a mais no DAS quando mercadorias com ICMS-ST já recolhido saem com CSOSN 102. A receita delas deveria ser segregada no PGDAS-D como "com substituição tributária" (LC 123/2006, art. 18, § 4º-A, I).
+
+- **Arquivos:** *Registro de Saídas Detalhado* e *Controle de Cálculo do Simples Nacional*, exportados em Excel pelo sistema contábil (Makro). A empresa vem do nome do arquivo (código do escritório ou razão social), e a referência vem das datas das vendas. Ajuste pelo ícone de lápis em *Importar* se precisar.
+- **Classificação de cada produto vendido:**
+  - *ST cobrado na entrada:* mesmo GTIN ou descrição numa memória de ICMS-ST da empresa.
+  - *Conferir a NF de entrada:* NCM do Subanexo I sem cobrança localizada.
+  - *Já emitido como ST:* CSOSN 500 ou CST 60.
+  - *Não ST:* produtos de Equalização, itens preparados na loja (empresas de alimentação, sem GTIN) e itens fora da lista.
+  - O usuário pode mudar a situação e o CEST de qualquer produto.
+- **Alíquota:** Anexo I pela RBT12.
+  - No início de atividade, a RBT12 é a receita do 1º mês × 12, ou a média dos meses anteriores × 12.
+  - Os meses sem relatório contam como sem receita.
+  - A RBT12, a alíquota efetiva e o % do ICMS podem ser informados à mão, conforme o extrato do PGDAS-D.
+- **Excel:**
+  - *Resumo*, com fórmulas.
+  - *Cadastro ERP*: CEST, CSOSN 500 e CFOP 5405/6404 por produto.
+  - *Vendas ST por NF*: item a item.
+
 ## O pedido na SEFAZ/MS
 
 Pela **Resolução SEFAZ nº 3.033/2019**, o optante pelo Simples Nacional pede a revisão eletrônica no **e-Fazenda → Informações Fiscais**:
@@ -113,6 +135,7 @@ assets/css/app.css      visual (tema claro/escuro, responsivo)
 assets/js/util.js       utilitários (números, datas, CNPJ, NCM…)
 assets/js/pdftext.js    extração de texto dos PDFs (pdf.js)
 assets/js/parsers.js    leitura: prévia, "Dados da Nota", memória ST, cartão CNPJ, XML
+assets/js/vendas.js     Vendas × ST: Registro de Saídas e Controle do Simples (Makro), classificação e Excel
 assets/js/legal.js      base legal e catálogo de checagens
 assets/js/subanexo.js   leitura e consulta da relação oficial (Subanexo I)
 assets/data/subanexo1-ms.js  relação oficial do Subanexo I (dados)

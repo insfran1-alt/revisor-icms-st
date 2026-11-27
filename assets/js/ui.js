@@ -1706,7 +1706,8 @@
     const label = k => { const [c, r, t] = k.split('|'); return `${nomeCurto(App.model.companies.get(c))} · ref. ${U.refLabel(r)} · ${t === 'ST' ? 'ICMS-ST' : 'Equalização'}`; };
     openModal(`<div class="mh"><h3>Requerimento de revisão</h3>
         <select data-req="grupo" aria-label="Empresa, referência e tributo">${keys.map(k => opt(k, label(k), `${o.companyId}|${o.referencia}|${o.tipo}`)).join('')}</select>
-        <button class="btn primary" type="button" data-act="req-word" ${res ? '' : 'disabled'}>${ic('download')} Word (.doc)</button>
+        <button class="btn primary" type="button" data-act="open-efazenda" data-origem="req" ${res ? '' : 'disabled'} title="Descrição (até 99) e justificativa (até 199) por NF e por item, para a tela Revisão de NF do e-Fazenda">${ic('list')} 1º pedido (e-Fazenda)</button>
+        <button class="btn" type="button" data-act="req-word" ${res ? '' : 'disabled'}>${ic('download')} Word (.doc)</button>
         <button class="btn" type="button" data-act="req-print" ${res ? '' : 'disabled'}>${ic('printer')} Imprimir / PDF</button>
         <button class="btn" type="button" data-act="req-mark" ${res ? '' : 'disabled'} title="Marca os achados incluídos como Solicitado">${ic('check')} Marcar como solicitado</button>
         <button class="btn icon ghost" type="button" data-act="close-modal" aria-label="Fechar">${ic('x')}</button></div>
@@ -1742,8 +1743,9 @@
     renderRequerimento();
   }
 
-  function openEFazenda() {
-    const fs = filteredFindings().filter(f => f.valorRevisar > 0);
+  function openEFazenda(origem) {
+    const doReq = origem === 'req' && App.reqOpts;
+    const fs = (doReq ? reqFindings() : filteredFindings()).filter(f => f.valorRevisar > 0);
     const txt = R.listaEFazenda(App.model, fs);
     const grupos = R.pedidoEFazenda(App.model, fs);
     App.efazGrupos = grupos;
@@ -1763,8 +1765,8 @@
             <td class="small">${copia(i.motivo)}</td><td class="small">${copia(i.descricao, R.LIM_DESC)}</td><td class="small efz-just">${copia(i.justificativa, R.LIM_JUST)}</td></tr>`).join('')}
           </tbody></table></div></div>`).join('') : '<div class="muted small">Nenhum item para alterar.</div>'}
       </div></div>`).join('');
-    openModal(`<div class="mh"><h3>Pedido no e-Fazenda — Revisão de NF</h3><button class="btn" type="button" data-act="export-efaz" ${grupos.length ? '' : 'disabled'}>${ic('download')} Excel</button><button class="btn" type="button" data-act="copy-efaz">${ic('copy')} Copiar resumo</button><button class="btn icon ghost" type="button" data-act="close-modal" aria-label="Fechar">${ic('x')}</button></div>
-      <div class="mb stack"><div class="callout">Montado como a tela <b>Informações Fiscais → Revisão de NF</b>: a aba <b>Notas a Desvincular</b> recebe a nota inteira; a aba <b>Notas a Alterar</b>, item a item. Em cada linha, escolha o <b>Motivo</b> indicado e, no quadro "Confirmação de Dados", cole a <b>Descrição</b> (até ${R.LIM_DESC} caracteres) e a <b>Justificativa</b> (até ${R.LIM_JUST}). Considera os achados do filtro atual da Revisão, sem os descartados. Um pedido por mês de referência e por tributo.</div>
+    openModal(`<div class="mh"><h3>Pedido no e-Fazenda — Revisão de NF</h3>${doReq ? `<button class="btn ghost" type="button" data-act="open-req" data-cid="${h(App.reqOpts.companyId)}" data-ref="${h(App.reqOpts.referencia)}">${ic('doc')} Voltar ao requerimento</button>` : ''}<button class="btn" type="button" data-act="export-efaz" ${grupos.length ? '' : 'disabled'}>${ic('download')} Excel</button><button class="btn" type="button" data-act="copy-efaz">${ic('copy')} Copiar resumo</button><button class="btn icon ghost" type="button" data-act="close-modal" aria-label="Fechar">${ic('x')}</button></div>
+      <div class="mb stack"><div class="callout">Montado como a tela <b>Informações Fiscais → Revisão de NF</b>: a aba <b>Notas a Desvincular</b> recebe a nota inteira; a aba <b>Notas a Alterar</b>, item a item. Em cada linha, escolha o <b>Motivo</b> indicado e, no quadro "Confirmação de Dados", cole a <b>Descrição</b> (até ${R.LIM_DESC} caracteres) e a <b>Justificativa</b> (até ${R.LIM_JUST}). ${doReq ? 'Considera os mesmos achados do requerimento (empresa, referência, tributo e forças escolhidos lá).' : 'Considera os achados do filtro atual da Revisão, sem os descartados.'} Este é o <b>1º pedido</b> (até o vencimento); o requerimento em Word serve para o e-SAP (nova revisão, reconsideração ou restituição). Um pedido por mês de referência e por tributo.</div>
       ${blocos || '<div class="muted">Nenhum valor a revisar no filtro atual.</div>'}
       <textarea id="efaz-text" hidden readonly>${h(txt)}</textarea></div>`);
   }
@@ -1912,7 +1914,7 @@
       toast(`${fs.length} achado(s) marcados como Solicitado. Informe o protocolo em cada um quando tiver.`, 'ok', 6000);
       renderRequerimento();
     },
-    'open-efazenda': () => openEFazenda(),
+    'open-efazenda': el => openEFazenda(el.dataset.origem),
     'copy-efaz': async () => { if (await U.copy($('#efaz-text').value)) toast('Resumo copiado.', 'ok'); },
     'export-efaz': () => { try { const n = R.exportarPedidoEFazenda(App.efazGrupos || []); toast(`Planilha do pedido gerada: ${n} linha(s).`, 'ok'); } catch (e) { toast('Erro: ' + h(e.message), 'err'); } },
     'add-company': () => { App.state.companies.push(newCompany({ razaoSocial: 'Nova empresa' })); commit(); toast('Empresa criada — preencha os dados no cartão.', 'ok'); },
