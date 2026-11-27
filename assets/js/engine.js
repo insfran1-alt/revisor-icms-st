@@ -86,7 +86,13 @@
     return ks;
   }
 
-  function resolveDestinacao(catalog, it, S) {
+  // ingredientes típicos de padaria/confeitaria/indústria de alimentos (prefixos de NCM)
+  const NCM_INGREDIENTE = ['0401', '0402', '0403', '0404', '0405', '0406', '0407', '0408', '0409', '1101', '1102', '1103', '1104', '1105', '1106', '1107', '1108', '1109',
+    '15', '1701', '1702', '1805', '180610', '180620', '190120', '2102'];
+  /** Empresa com atividade de fabricação: marcada como industrial ou com CNAE industrial (principal ou secundário). */
+  const temFabricacao = c => !!c && c.industrial !== false && (c.industrial === true || [c.cnaePrincipal].concat(c.cnaesSecundarios || []).some(x => x && U.cnaeIndustrial(x.codigo)));
+
+  function resolveDestinacao(catalog, it, S, company) {
     for (const k of catKeys(it.companyId || '?', it)) {
       const e = catalog[k];
       if (e && e.destinacao !== undefined) return { valor: e.destinacao, origem: 'usuario', chave: k, palavra: null };
@@ -96,6 +102,9 @@
     if ((w = kwMatch(it.descricao, kws.insumo))) return { valor: 'insumo', origem: 'sugestao', palavra: w };
     if ((w = kwMatch(it.descricao, kws.degustacao))) return { valor: 'degustacao', origem: 'sugestao', palavra: w };
     if ((w = kwMatch(it.descricao, kws.uso_consumo))) return { valor: 'uso_consumo', origem: 'sugestao', palavra: w };
+    // empresa com fabricação + NCM de ingrediente alimentar (laticínios, farinhas, gorduras, açúcar, cacau, fermento)
+    const ncm = U.digits(it.ncm);
+    if (ncm && temFabricacao(company) && NCM_INGREDIENTE.some(p => ncm.startsWith(p))) return { valor: 'insumo', origem: 'sugestao', palavra: `NCM ${U.fmtNCM(ncm)} de ingrediente e CNAE de fabricação` };
     return { valor: '', origem: '', palavra: null };
   }
 
@@ -396,7 +405,7 @@
           } else { it.mvaAj = null; it.mvaOrig = null; }
           it.icmsCalc = U.round2(U.round2((it.bcST || 0) * it.aliqIntra / 100) - (it.credito || 0));
           it.base = custo;
-          it.dest = resolveDestinacao(catalog, it, S);
+          it.dest = resolveDestinacao(catalog, it, S, companies.get(ch.companyId));
           // referência de MVA: a tabela do usuário prevalece; sem ela, a relação oficial (Subanexo I)
           it.mvaRef = findMva(mvaTable, it);
           it.oficial = sub ? SUB.buscarItem(sub, it.cest || it.cestXml, it.ncm) : null;
@@ -406,7 +415,7 @@
         } else {
           it.base = U.round2((it.valorTotal || 0) + (it.frete || 0) + (it.seguro || 0) + (it.ipi || 0) + (it.outros || 0) - (it.desconto || 0));
           it.icmsCalc = U.round2(it.base * (it.percentual || 0) / 100);
-          it.dest = resolveDestinacao(catalog, it, S);
+          it.dest = resolveDestinacao(catalog, it, S, companies.get(ch.companyId));
           it.mvaRef = findMva(mvaTable, it);
         }
         items.push(it); itemsById.set(it.id, it);
