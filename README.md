@@ -85,7 +85,12 @@ O que a tela faz:
 - **Dados do DAEMS:** guarda o número (formato `01.170.776.181-49`), o valor, o vencimento e a data do pagamento.
 - **Justificativa do 1º pedido no e-Fazenda:** com o número informado, a justificativa passa a citar o DAEMS, dentro dos 199 caracteres. Ex.: "devido só o DIFAL de R$ 209,78, recolhido no DAEMS 01.170.776.181-49".
 - **Requerimento:** traz o quadro "1.2. Valores que continuam devidos e seu recolhimento", o pedido de reconhecimento do recolhimento e um anexo com a memória de cálculo.
+- **Exclusão integral no 1º pedido:**
+  - Itens que passam a DIFAL ou Equalização têm o ICMS-ST excluído por inteiro (ex.: "Excluir R$ 381,74"), e o outro imposto é recolhido em DAEMS próprio, com a memória de cálculo.
+  - O mesmo vale para os itens de ICMS-ST revisados só em parte, quando o DAEMS do ICMS-ST correto é informado.
+  - O requerimento usa os mesmos valores a excluir.
 - **ICMS-ST residual:** nos itens que continuam na ST mas foram revisados só em parte (MVA, crédito, cálculo), o ICMS-ST correto (cobrado − revisado) entra como modalidade própria, porque a alteração no e-Fazenda pode não gerar esse valor. Com o número do DAEMS, a justificativa do item informa "ICMS-ST residual de R$ … recolhido no DAEMS …".
+- **Análise de economia (uso interno, não vai para a SEFAZ):** compara, por item, o ICMS cobrado com o imposto que continua devido após a revisão (DIFAL, Equalização ou residual). Mostra a economia em reais e em %, e marca os itens com economia pequena (abaixo de R$ 10,00). O Excel tem as abas *Resumo* (por imposto após a revisão), *Por nota* e *Por item*.
 - **Excel – memória de cálculo:** duas abas ligadas por fórmulas, com cabeçalho de identificação (empresa, CNPJ, IE, referência, data e fonte) e, abaixo de cada tabela, o total por modalidade (DIFAL, Equalização e ICMS-ST residual) com o nº do DAEMS.
   - **Por nota:** remetente, NF-e, emissão, chave de acesso e totais de cada nota.
   - **Por item:** as mesmas colunas da planilha usada no escritório (Produto+Frete+IPI, Alíquota Inter., Crédito ICMS, Alíquota Destino, B.C ICMS, Débito ICMS, Total a Recolher), com o motivo da revisão, o ICMS-ST cobrado e o revisado.

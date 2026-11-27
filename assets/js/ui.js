@@ -504,15 +504,18 @@
       <p>Aparecem aqui os itens revisados que continuam com imposto devido: bens de uso e consumo, brinde ou degustação (DIFAL), insumos ou itens fora da ST (Equalização) e itens revisados só em parte, cujo ICMS-ST residual a alteração pode não gerar. Escolha a empresa e a referência no topo, ou marque a destinação dos itens na Revisão.</p></div>`;
     const tot = t => U.sum(grupos.filter(g => g.tipo === t), g => g.total);
     const ok = grupos.filter(g => g.ok).length;
+    let eco = null;
+    try { eco = D.analisarEconomia(App.model, App.model.findings.filter(inScope), E.settingsOf(App.state), App.state.daems); } catch (e) { console.error(e); }
     return `<div class="stack">
       <div class="card hero">
         <div>
           <div class="muted small">Imposto que continua devido nos itens revisados · ${h(App.ui.empresa ? nomeCurto(App.model.companies.get(App.ui.empresa)) : 'todas as empresas')}${App.ui.ref ? ' · ref. ' + h(U.refLabel(App.ui.ref)) : ''}</div>
           <div class="big">${U.brl(tot('DIFAL') + tot('EQ') + tot('ST'))}</div>
           <p class="lead">DIFAL ${U.brl(tot('DIFAL'))} · Equalização ${U.brl(tot('EQ'))} · ICMS-ST residual ${U.brl(tot('ST'))} · ${ok}/${grupos.length} DAEMS informado(s)</p>
+          ${eco ? `<div class="callout ok" style="margin-top:10px"><b>Economia estimada para o cliente:</b> ${U.brl(eco.economia)}. Ele deixa de pagar ${U.brl(eco.cobrado)} de ICMS cobrado nos itens do pedido e passa a pagar ${U.brl(eco.devido)} (DIFAL, Equalização e residuais), em ${eco.notas} nota(s) e ${eco.linhas.length} item(ns). <button class="btn sm" type="button" data-act="export-economia">${ic('download')} Análise de economia (uso interno)</button></div>` : ''}
         </div>
         <div class="stack">
-          <div class="callout">Emita o DAEMS de cada valor (empresa, referência e imposto) e informe o número no formato <b>01.170.776.181-49</b>. O <b>ICMS-ST residual</b> é o ST que continua devido nos itens revisados só em parte (ICMS-ST cobrado − valor revisado): recolha-o em guia própria, pois a alteração no e-Fazenda pode não gerar esse valor. O número entra na <b>justificativa do 1º pedido</b> no e-Fazenda e no <b>requerimento</b>, com a memória de cálculo anexa.</div>
+          <div class="callout">Emita o DAEMS de cada valor (empresa, referência e imposto) e informe o número no formato <b>01.170.776.181-49</b>. No 1º pedido, o ICMS-ST desses itens é excluído por inteiro, e o imposto devido (DIFAL, Equalização ou o ICMS-ST correto dos itens revisados só em parte) é recolhido no DAEMS, detalhado pela memória de cálculo. O número entra na <b>justificativa do 1º pedido</b> no e-Fazenda e no <b>requerimento</b>, com a memória de cálculo anexa.</div>
           <div class="row"><button class="btn primary" type="button" data-act="export-daems">${ic('download')} Memória de cálculo (Excel)</button><button class="btn" type="button" data-act="open-efazenda">${ic('list')} 1º pedido (e-Fazenda)</button></div>
         </div>
       </div>
@@ -533,10 +536,11 @@
               <label class="field" style="grid-column:span 2"><span>Observação</span><input type="text" data-dae="${k}" data-k="obs" value="${h(d.obs)}" placeholder="opcional"></label>
             </div>
             ${dif !== null && Math.abs(dif) > 0.009 ? `<div class="callout warn">O valor do DAEMS difere da memória de cálculo em ${U.brl(dif)}.</div>` : ''}
-            <div class="table-wrap"><table class="data"><thead><tr><th>NF</th><th>Item</th><th class="num">ICMS-ST cobrado</th><th class="num">Valor da operação</th><th class="num">Alíq. inter.</th><th class="num">Alíq. interna</th><th class="num">ICMS origem</th><th class="num">Base</th><th class="num">Devido</th></tr></thead><tbody>
+            <div class="table-wrap"><table class="data"><thead><tr><th>NF</th><th>Item</th><th class="num">ICMS-ST excluído</th><th class="num">Valor da operação</th><th class="num">Alíq. inter.</th><th class="num">Alíq. interna</th><th class="num">ICMS origem</th><th class="num">Base</th><th class="num">Devido</th></tr></thead><tbody>
               ${g.linhas.map(l => `<tr><td class="nowrap"><b>${h(l.numero)}</b><div class="sub">${h(U.fmtCNPJ(l.cnpjRemetente || ''))}${l.ufRemetente ? '/' + h(l.ufRemetente) : ''}</div></td><td class="desc small"><b>${h(l.descricao)}</b><div class="sub">NCM ${h(U.fmtNCM(l.ncm))} · ${h(l.regra)}</div></td>
                 <td class="num">${U.brl(l.icmsCobrado)}</td><td class="num">${U.brl(l.valorOperacao)}</td><td class="num">${U.fmt(l.aliqInter, 2)}%</td><td class="num">${U.fmt(l.aliqIntra, 2)}%</td><td class="num">${l.icmsOrigem !== null ? U.brl(l.icmsOrigem) : '—'}</td><td class="num">${U.brl(l.bc)}</td><td class="num"><b>${U.brl(l.devido)}</b></td></tr>`).join('')}
-            </tbody><tfoot><tr><th colspan="8">Total</th><th class="num">${U.brl(g.total)}</th></tr></tfoot></table></div>
+            </tbody><tfoot><tr><th colspan="2">Total</th><th class="num">${U.brl(U.sum(g.linhas, l => l.icmsCobrado))}</th><th colspan="5"></th><th class="num">${U.brl(g.total)}</th></tr></tfoot></table></div>
+            <div class="small muted">No 1º pedido, o ICMS-ST desses itens é excluído por inteiro (${U.brl(U.sum(g.linhas, l => l.icmsCobrado))}); ${g.tipo === 'EQ' ? 'a' : 'o'} ${h(D.TIPOS[g.tipo].curto)} de ${U.brl(g.total)} é ${g.tipo === 'EQ' ? 'recolhida' : 'recolhido'} neste DAEMS, conforme a memória de cálculo.${g.tipo === 'ST' && !g.ok ? ' Enquanto o DAEMS não for informado, o pedido exclui só o excesso e o ICMS-ST correto fica na própria cobrança.' : ''}</div>
             <div class="small muted">Fundamento: ${h(D.TIPOS[g.tipo].base)}.</div>
           </div></div>`;
       }).join('')}
@@ -1934,6 +1938,14 @@
         toast(`Memória gerada: ${r.itens} item(ns), por nota e por item, com o total de cada modalidade.`, 'ok');
       }
       catch (e) { console.error(e); toast('Não foi possível gerar a planilha: ' + h(e.message), 'err'); }
+    },
+    'export-economia': () => {
+      try {
+        const c = App.model.companies.get(App.ui.empresa);
+        const an = DA().analisarEconomia(App.model, App.model.findings.filter(inScope), E.settingsOf(App.state), App.state.daems);
+        const r = DA().exportarAnalise(App.model, an, `Análise de economia (interno)${c ? ' - ' + (c.nomeFantasia || c.razaoSocial || '').replace(/[\\/:*?"<>|]+/g, ' ').trim() : ''}${App.ui.ref ? ' - ' + U.refLabel(App.ui.ref).replace('/', '.') : ''}.xlsx`);
+        toast(`Análise gerada: ${r.itens} item(ns), economia de ${U.brl(r.economia)}.`, 'ok');
+      } catch (e) { console.error(e); toast('Não foi possível gerar a análise: ' + h(e.message), 'err'); }
     },
     'vendas-filtro': el => {
       App.ui.vendas.sit = el.dataset.v; savePrefs();

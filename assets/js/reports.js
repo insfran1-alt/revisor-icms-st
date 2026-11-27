@@ -109,7 +109,14 @@
     const c = model.companies.get(opts.companyId) || {};
     const fs = opts.findings.filter(f => f.valorRevisar > 0 || f.integral);
     const cons = consolidar(model, fs);
-    const totalRev = U.round2(U.sum(cons, x => x.total));
+    // valores a excluir iguais aos do pedido no e-Fazenda (item que vira DIFAL/Equalização sai inteiro da ST)
+    const ped = pedidoEFazenda(model, fs, opts.daems || {});
+    const excl = new Map(), linhasPed = [];
+    ped.forEach(g => {
+      g.desvincular.forEach(n => { excl.set(n.chargeId, n.revisar); linhasPed.push({ numero: n.numero, item: '(NF inteira)', ncm: '', cest: '', icms: n.icmsNF, excluir: n.revisar, motivo: n.descricao }); });
+      g.alterar.forEach(n => { excl.set(n.chargeId, n.revisar); n.itens.forEach(i => { const it = model.itemsById.get(i.itemId) || {}; linhasPed.push({ numero: n.numero, item: i.descricaoItem, ncm: i.ncm, cest: it.cest || '', icms: i.icms, excluir: i.revisar, motivo: i.descricao.replace(/\.\s*Excluir R\$.*$/, '') }); }); });
+    });
+    const totalRev = U.round2(U.sum([...excl.values()]));
     const charges = model.charges.filter(ch => ch.companyId === opts.companyId && ch.referencia === opts.referencia && ch.tipo === opts.tipo);
     const totalCobrado = U.round2(U.sum(charges, ch => ch.valorICMS));
     const cod = (charges[0] && charges[0].tributoCodigo) || (opts.tipo === 'ST' ? '333' : '349');
@@ -124,8 +131,8 @@
     const docs = U.uniq(fs.flatMap(f => f.documentos || []));
     const e = U.esc;
 
-    const tabNF = cons.map(x => `<tr><td>${e(x.ch.numero)}</td><td>${e(U.brDate(x.ch.dataEmissao))}</td><td>${e(U.fmtCNPJ(x.ch.cnpjRemetente))}/${e(x.ch.ufRemetente || '')}</td><td class="num">${U.brl(x.ch.valorICMS)}</td><td class="num">${U.brl(x.total)}</td><td>${x.integral ? 'Desvincular a NF' : 'Revisão parcial (itens)'}</td></tr>`).join('');
-    const tabItens = fs.slice().sort((a, b) => (+a.numero - +b.numero) || (b.valorRevisar - a.valorRevisar)).map(f => `<tr><td>${e(f.numero)}</td><td>${e(f.descricao || '(NF inteira)')}</td><td>${e(U.fmtNCM(f.ncm))}${f.cest ? '<br>' + e(U.fmtCEST(f.cest)) : ''}</td><td class="num">${U.brl(f.icmsCobrado)}</td><td class="num">${U.brl(f.valorRevisar)}</td><td>${e(f.regra)}</td></tr>`).join('');
+    const tabNF = cons.map(x => `<tr><td>${e(x.ch.numero)}</td><td>${e(U.brDate(x.ch.dataEmissao))}</td><td>${e(U.fmtCNPJ(x.ch.cnpjRemetente))}/${e(x.ch.ufRemetente || '')}</td><td class="num">${U.brl(x.ch.valorICMS)}</td><td class="num">${U.brl(excl.has(x.ch.id) ? excl.get(x.ch.id) : x.total)}</td><td>${x.integral ? 'Desvincular a NF' : 'Revisão parcial (itens)'}</td></tr>`).join('');
+    const tabItens = linhasPed.sort((a, b) => (+a.numero - +b.numero) || (b.excluir - a.excluir)).map(l => `<tr><td>${e(l.numero)}</td><td>${e(l.item)}</td><td>${e(U.fmtNCM(l.ncm))}${l.cest ? '<br>' + e(U.fmtCEST(l.cest)) : ''}</td><td class="num">${U.brl(l.icms)}</td><td class="num">${U.brl(l.excluir)}</td><td>${e(l.motivo)}</td></tr>`).join('');
     const direito = regras.map((rid, i) => {
       const R = L.REGRAS[rid];
       const its = fs.filter(f => f.ruleId === rid);
@@ -153,10 +160,10 @@
       <p><b>${e(c.razaoSocial || '')}</b>, optante pelo Simples Nacional, inscrita no CNPJ sob o nº ${e(U.fmtCNPJ(c.cnpj || ''))}${c.ie ? ` e na Inscrição Estadual nº ${e(c.ie)}` : ''}${end ? `, estabelecida em ${e(end)}, ${e(c.municipio || '')}/${e(c.uf || 'MS')}` : ''}${cnaes.length ? `, com atividade principal ${e(cnaes[0].codigo)} — ${e(cnaes[0].descricao)}${cnaes.length > 1 ? ` e atividades secundárias ${e(cnaes.slice(1).map(x => x.codigo + ' — ' + x.descricao).join('; '))}` : ''}` : ''}, vem, respeitosamente, com fundamento na Resolução SEFAZ nº 3.033/2019, requerer a <b>revisão da apuração da cobrança do ${e(trib)}</b> da referência <b>${e(ref)}</b>, pelos fatos e fundamentos a seguir expostos.</p>
       <h2>1. Dos fatos</h2>
       <p>A SEFAZ/MS apurou, na referência ${e(ref)}, o total de ${U.brl(totalCobrado)} a título de ${e(trib)}, relativo a ${charges.length} nota(s) fiscal(is), conforme o Relatório de Prévia com Cálculos ICMS. Da conferência das memórias de cálculo, item a item, foram identificadas as inconsistências abaixo, que somam <b>${U.brl(totalRev)}</b> cobrados indevidamente ou a maior.</p>
-      <table><thead><tr><th>NF</th><th>Emissão</th><th>Remetente / UF</th><th class="num">ICMS cobrado</th><th class="num">A revisar</th><th>Pedido</th></tr></thead><tbody>${tabNF}</tbody>
+      <table><thead><tr><th>NF</th><th>Emissão</th><th>Remetente / UF</th><th class="num">ICMS cobrado</th><th class="num">A excluir</th><th>Pedido</th></tr></thead><tbody>${tabNF}</tbody>
       <tfoot><tr><th colspan="3">Total</th><th class="num">${U.brl(U.sum(cons, x => x.ch.valorICMS))}</th><th class="num">${U.brl(totalRev)}</th><th></th></tr></tfoot></table>
       <h3>1.1. Detalhamento por item</h3>
-      <table><thead><tr><th>NF</th><th>Item</th><th>NCM / CEST</th><th class="num">ICMS cobrado</th><th class="num">A revisar</th><th>Motivo</th></tr></thead><tbody>${tabItens}</tbody></table>
+      <table><thead><tr><th>NF</th><th>Item</th><th>NCM / CEST</th><th class="num">ICMS cobrado</th><th class="num">A excluir</th><th>Motivo</th></tr></thead><tbody>${tabItens}</tbody></table>
       ${secDev}
       <h2>2. Do direito</h2>${direito}
       <h2>3. Do pedido</h2>
@@ -301,7 +308,7 @@
       const desvincular = [], alterar = [];
       lista.forEach(x => {
         const ch = x.ch, nf = model.nfsByKey.get(ch.nfKey);
-        const base = { numero: ch.numero, cnpj: ch.cnpjRemetente, razao: (nf && nf.remetenteNome) || '', uf: ch.ufRemetente || '', emissao: ch.dataEmissao, icmsNF: ch.valorICMS };
+        const base = { chargeId: ch.id, tipo: ch.tipo, numero: ch.numero, cnpj: ch.cnpjRemetente, razao: (nf && nf.remetenteNome) || '', uf: ch.ufRemetente || '', emissao: ch.dataEmissao, icmsNF: ch.valorICMS };
         const daNota = x.findings.filter(f => f.escopo === 'nota');
         if (daNota.some(f => f.integral)) { // motivo da nota inteira (devolução, cancelamento, outro destinatário, ME isenta…)
           const fsN = daNota.filter(f => f.integral);
@@ -311,26 +318,31 @@
         const porItem = U.groupBy(x.findings.filter(f => f.escopo === 'item'), f => f.itemId);
         const itens = Object.entries(porItem).map(([itemId, ifs]) => {
           const it = model.itemsById.get(itemId) || {};
-          const rev = U.round2(Math.min(it.icms || 0, U.sum(ifs, f => f.valorRevisar)));
-          const campos = camposPedido(ifs, rev, daems);
-          // item que continua na ST, revisado em parte: informa o ICMS-ST residual recolhido em guia própria
-          const D = global.RST_DAEMS, residual = U.round2((it.icms || 0) - rev);
-          const dae = D && ch.tipo === 'ST' && residual > 0.005 && !ifs.some(f => D.REGRAS[f.ruleId]) ? D.numeroPor(daems, ch.companyId, ch.referencia, 'ST') : '';
+          const icms = U.round2(it.icms || 0);
+          const liquido = U.round2(Math.min(icms, U.sum(ifs, f => f.valorRevisar)));
+          const D = global.RST_DAEMS;
+          // DIFAL / Equalização: o ICMS-ST do item é todo indevido — exclui-se o item inteiro e o outro imposto vai em DAEMS próprio
+          const subst = !!(D && ifs.some(f => D.REGRAS[f.ruleId]));
+          // item que continua na ST, revisado em parte: com o DAEMS do ICMS-ST correto informado, exclui-se o item inteiro
+          const residual = U.round2(icms - liquido);
+          const dae = !subst && D && ch.tipo === 'ST' && residual > 0.005 ? D.numeroPor(daems, ch.companyId, ch.referencia, 'ST') : '';
+          const excluir = subst || dae ? icms : liquido;
+          const campos = camposPedido(ifs, excluir, daems);
           if (dae) {
-            const extra = `ICMS-ST residual de ${U.brl(residual)} recolhido no DAEMS ${dae}`;
+            const extra = `ICMS-ST correto de ${U.brl(residual)} recolhido no DAEMS ${dae}`;
             const j = semPontoFinal(campos.justificativa);
             campos.justificativa = (j.length + extra.length + 3 <= LIM_JUST ? `${j}; ${extra}` : `${cortar(j.replace(/\s*\([^)]*\)\s*$/, ''), LIM_JUST - extra.length - 3)}; ${extra}`) + '.';
           }
-          return Object.assign({ ncm: it.ncm || '', descricaoItem: it.descricao || '', valorTotal: it.valorTotal || 0, icms: it.icms || 0, revisar: rev }, campos);
+          return Object.assign({ itemId, ncm: it.ncm || '', descricaoItem: it.descricao || '', valorTotal: it.valorTotal || 0, icms, revisar: excluir, liquido, emGuia: subst || dae ? residual : 0 }, campos);
         }).sort((a, b) => b.revisar - a.revisar);
         // achado da nota sem item (ex.: bases acima do valor da NF): vai como linha da própria nota
-        daNota.forEach(f => itens.push(Object.assign({ ncm: '', descricaoItem: '(nota inteira)', valorTotal: ch.valorNF || 0, icms: ch.valorICMS, revisar: f.valorRevisar }, camposPedido([f], f.valorRevisar, daems))));
-        if (itens.length) alterar.push(Object.assign(base, { revisar: U.round2(x.total), itens }));
+        daNota.forEach(f => itens.push(Object.assign({ ncm: '', descricaoItem: '(nota inteira)', valorTotal: ch.valorNF || 0, icms: ch.valorICMS, revisar: f.valorRevisar, liquido: f.valorRevisar, emGuia: 0 }, camposPedido([f], f.valorRevisar, daems))));
+        if (itens.length) alterar.push(Object.assign(base, { revisar: U.round2(Math.min(ch.valorICMS || Infinity, U.sum(itens, i => i.revisar))), itens }));
       });
       return {
         empresa: nomeEmpresa(c), ie: c.ie || '', cnpjEmpresa: c.cnpj || '', referencia: ch0.referencia, tipo: ch0.tipo, tributoCodigo: ch0.tributoCodigo,
         desvincular: desvincular.sort((a, b) => b.revisar - a.revisar), alterar: alterar.sort((a, b) => b.revisar - a.revisar),
-        total: U.round2(U.sum(lista, x => x.total))
+        total: U.round2(U.sum(desvincular, n => n.revisar) + U.sum(alterar, n => n.revisar))
       };
     }).sort((a, b) => String(b.referencia).localeCompare(String(a.referencia)) || a.empresa.localeCompare(b.empresa));
   }
