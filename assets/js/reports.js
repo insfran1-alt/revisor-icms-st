@@ -136,7 +136,7 @@
     const D = global.RST_DAEMS;
     const dev = D && opts.settings ? D.apurar(model, fs, opts.settings, opts.daems || {}) : [];
     const secDev = dev.length ? `<h3>1.2. Valores que continuam devidos e seu recolhimento</h3>
-      <p>Sobre os itens revisados permanece devido o imposto abaixo, calculado sem MVA, ${dev.every(g => g.ok) ? 'já recolhido nos DAEMS indicados' : 'a ser recolhido em DAEMS próprio'}. A memória de cálculo, item a item, segue anexa.</p>
+      <p>Sobre os itens revisados permanece devido o imposto abaixo, ${dev.every(g => g.ok) ? 'já recolhido nos DAEMS indicados' : 'a ser recolhido em DAEMS próprio'}. A memória de cálculo, item a item, segue anexa.</p>
       <table><thead><tr><th>Imposto</th><th class="num">Itens</th><th class="num">Valor devido</th><th>Nº do DAEMS</th><th class="num">Valor do DAEMS</th><th>Fundamento</th></tr></thead><tbody>
       ${dev.map(g => `<tr><td>${e(D.TIPOS[g.tipo].nome)}</td><td class="num">${g.linhas.length}</td><td class="num">${U.brl(g.total)}</td><td>${e(g.daems.numero || '(a informar)')}</td><td class="num">${g.daems.valor !== '' ? U.brl(+g.daems.valor) : ''}</td><td class="small">${e(D.TIPOS[g.tipo].base)}</td></tr>`).join('')}</tbody></table>` : '';
     const anexoDev = dev.length ? `<div class="anexo"><h2>Anexo — Memória de cálculo do DIFAL e da Equalização</h2>${dev.map(g => `<h3>${e(D.TIPOS[g.tipo].nome)}${g.daems.numero ? ` — DAEMS nº ${e(g.daems.numero)}` : ''}</h3>
@@ -312,7 +312,16 @@
         const itens = Object.entries(porItem).map(([itemId, ifs]) => {
           const it = model.itemsById.get(itemId) || {};
           const rev = U.round2(Math.min(it.icms || 0, U.sum(ifs, f => f.valorRevisar)));
-          return Object.assign({ ncm: it.ncm || '', descricaoItem: it.descricao || '', valorTotal: it.valorTotal || 0, icms: it.icms || 0, revisar: rev }, camposPedido(ifs, rev, daems));
+          const campos = camposPedido(ifs, rev, daems);
+          // item que continua na ST, revisado em parte: informa o ICMS-ST residual recolhido em guia própria
+          const D = global.RST_DAEMS, residual = U.round2((it.icms || 0) - rev);
+          const dae = D && ch.tipo === 'ST' && residual > 0.005 && !ifs.some(f => D.REGRAS[f.ruleId]) ? D.numeroPor(daems, ch.companyId, ch.referencia, 'ST') : '';
+          if (dae) {
+            const extra = `ICMS-ST residual de ${U.brl(residual)} recolhido no DAEMS ${dae}`;
+            const j = semPontoFinal(campos.justificativa);
+            campos.justificativa = (j.length + extra.length + 3 <= LIM_JUST ? `${j}; ${extra}` : `${cortar(j.replace(/\s*\([^)]*\)\s*$/, ''), LIM_JUST - extra.length - 3)}; ${extra}`) + '.';
+          }
+          return Object.assign({ ncm: it.ncm || '', descricaoItem: it.descricao || '', valorTotal: it.valorTotal || 0, icms: it.icms || 0, revisar: rev }, campos);
         }).sort((a, b) => b.revisar - a.revisar);
         // achado da nota sem item (ex.: bases acima do valor da NF): vai como linha da própria nota
         daNota.forEach(f => itens.push(Object.assign({ ncm: '', descricaoItem: '(nota inteira)', valorTotal: ch.valorNF || 0, icms: ch.valorICMS, revisar: f.valorRevisar }, camposPedido([f], f.valorRevisar, daems))));

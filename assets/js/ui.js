@@ -500,20 +500,20 @@
   function viewDaems() {
     const grupos = gruposDaems();
     const D = DA();
-    if (!grupos.length) return `<div class="card empty"><div class="ico">${ic('save')}</div><h3>Nenhum DIFAL ou Equalização a recolher no escopo</h3>
-      <p>Aparecem aqui os itens revisados que continuam com imposto devido: bens de uso e consumo, brinde ou degustação (DIFAL) e insumos ou itens fora da ST (Equalização). Escolha a empresa e a referência no topo, ou marque a destinação dos itens na Revisão.</p></div>`;
+    if (!grupos.length) return `<div class="card empty"><div class="ico">${ic('save')}</div><h3>Nenhum imposto a recolher em guia própria no escopo</h3>
+      <p>Aparecem aqui os itens revisados que continuam com imposto devido: bens de uso e consumo, brinde ou degustação (DIFAL), insumos ou itens fora da ST (Equalização) e itens revisados só em parte, cujo ICMS-ST residual a alteração pode não gerar. Escolha a empresa e a referência no topo, ou marque a destinação dos itens na Revisão.</p></div>`;
     const tot = t => U.sum(grupos.filter(g => g.tipo === t), g => g.total);
     const ok = grupos.filter(g => g.ok).length;
     return `<div class="stack">
       <div class="card hero">
         <div>
           <div class="muted small">Imposto que continua devido nos itens revisados · ${h(App.ui.empresa ? nomeCurto(App.model.companies.get(App.ui.empresa)) : 'todas as empresas')}${App.ui.ref ? ' · ref. ' + h(U.refLabel(App.ui.ref)) : ''}</div>
-          <div class="big">${U.brl(tot('DIFAL') + tot('EQ'))}</div>
-          <p class="lead">DIFAL ${U.brl(tot('DIFAL'))} · Equalização ${U.brl(tot('EQ'))} · ${ok}/${grupos.length} DAEMS informado(s)</p>
+          <div class="big">${U.brl(tot('DIFAL') + tot('EQ') + tot('ST'))}</div>
+          <p class="lead">DIFAL ${U.brl(tot('DIFAL'))} · Equalização ${U.brl(tot('EQ'))} · ICMS-ST residual ${U.brl(tot('ST'))} · ${ok}/${grupos.length} DAEMS informado(s)</p>
         </div>
         <div class="stack">
-          <div class="callout">Emita o DAEMS de cada valor (empresa, referência e imposto) e informe o número no formato <b>01.170.776.181-49</b>. O número entra na <b>justificativa do 1º pedido</b> no e-Fazenda e no <b>requerimento</b>, com a memória de cálculo anexa.</div>
-          <div class="row"><button class="btn primary" type="button" data-act="export-daems">${ic('download')} Apuração e memória de cálculo (Excel)</button><button class="btn" type="button" data-act="open-efazenda">${ic('list')} 1º pedido (e-Fazenda)</button></div>
+          <div class="callout">Emita o DAEMS de cada valor (empresa, referência e imposto) e informe o número no formato <b>01.170.776.181-49</b>. O <b>ICMS-ST residual</b> é o ST que continua devido nos itens revisados só em parte (ICMS-ST cobrado − valor revisado): recolha-o em guia própria, pois a alteração no e-Fazenda pode não gerar esse valor. O número entra na <b>justificativa do 1º pedido</b> no e-Fazenda e no <b>requerimento</b>, com a memória de cálculo anexa.</div>
+          <div class="row"><button class="btn primary" type="button" data-act="export-daems">${ic('download')} Memória de cálculo (Excel)</button><button class="btn" type="button" data-act="open-efazenda">${ic('list')} 1º pedido (e-Fazenda)</button></div>
         </div>
       </div>
       ${grupos.map(g => {
@@ -1930,8 +1930,8 @@
     'export-daems': () => {
       try {
         const c = App.model.companies.get(App.ui.empresa);
-        const r = DA().exportar(App.model, gruposDaems(), `Apuração ICMS DIFAL e Equalização${c ? ' - ' + (c.nomeFantasia || c.razaoSocial || '').replace(/[\\/:*?"<>|]+/g, ' ').trim() : ''}${App.ui.ref ? ' - ' + U.refLabel(App.ui.ref).replace('/', '.') : ''}.xlsx`);
-        toast(`Apuração gerada: ${r.itens} item(ns) em ${r.grupos} modalidade(s), por item, por nota e por modalidade.`, 'ok');
+        const r = DA().exportar(App.model, gruposDaems(), `Apuração ICMS DIFAL, Equalização e ST residual${c ? ' - ' + (c.nomeFantasia || c.razaoSocial || '').replace(/[\\/:*?"<>|]+/g, ' ').trim() : ''}${App.ui.ref ? ' - ' + U.refLabel(App.ui.ref).replace('/', '.') : ''}.xlsx`);
+        toast(`Memória gerada: ${r.itens} item(ns), por nota e por item, com o total de cada modalidade.`, 'ok');
       }
       catch (e) { console.error(e); toast('Não foi possível gerar a planilha: ' + h(e.message), 'err'); }
     },
