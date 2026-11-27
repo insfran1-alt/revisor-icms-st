@@ -631,9 +631,26 @@
     return cs.find(x => x.id === App.ui.empresa) || (cs.length === 1 ? cs[0] : null);
   }
 
+  /** Igualdade profunda, sem depender da ordem dos campos (o documento gravado pode voltar com outra ordem). */
+  function mesmoConteudo(a, b) {
+    if (a === b) return true;
+    if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return (a ?? null) === (b ?? null);
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    const ka = Object.keys(a).filter(k => a[k] !== undefined), kb = Object.keys(b).filter(k => b[k] !== undefined);
+    return ka.length === kb.length && ka.every(k => mesmoConteudo(a[k], b[k]));
+  }
+
   function addDoc(d, res) {
     if (d.kind === 'desconhecido' || d.kind === 'erro') { res.erros.push(`${d.fileName}: ${(d.warnings || []).join(' ')}`); return null; }
-    if (App.state.docs.some(x => x.hash === d.hash && (x.part || 0) === (d.part || 0))) { res.dup.push(d.fileName); return null; }
+    // mesmo arquivo já importado: se a leitura é igual, é repetido; se mudou (o app foi corrigido), substitui o documento antigo
+    const prev = App.state.docs.find(x => x.hash === d.hash && (x.part || 0) === (d.part || 0));
+    let linkManual = null;
+    if (prev) {
+      if (prev.kind === d.kind && mesmoConteudo(prev.data, d.data)) { res.dup.push(d.fileName); return null; }
+      App.state.docs = App.state.docs.filter(x => x !== prev);
+      if (prev.kind === d.kind && prev.link && prev.link.manual) linkManual = prev.link;
+      res.relidos = (res.relidos || []).concat(d.fileName);
+    }
     const doc = Object.assign({ id: U.uid(), importedAt: new Date().toISOString(), link: {} }, d);
     if (doc.kind === 'cnpj') {
       const c = upsertCompanyFromCartao(doc.data); doc.link = { companyId: c.id }; res.empresas.push(nomeCurto(c));
@@ -657,6 +674,7 @@
         if (old.length) { App.state.docs = App.state.docs.filter(x => !old.includes(x)); res.subst.push(doc.fileName); }
       }
     }
+    if (linkManual) { doc.link = linkManual; doc.warnings = (doc.warnings || []).filter(w => !/não cadastrada|não identificada|diferente da empresa/.test(w)); }
     App.state.docs.push(doc);
     res.ok.push(doc.fileName);
     if (doc.warnings && doc.warnings.length) res.avisos.push(`${doc.fileName}: ${doc.warnings.join(' ')}`);
@@ -680,7 +698,7 @@
     }
     App.lastImport = res;
     commit();
-    const msg = `${res.ok.length} documento(s) importado(s)${res.dup.length ? ` · ${res.dup.length} repetido(s)` : ''}${res.erros.length ? ` · ${res.erros.length} não reconhecido(s)` : ''}.`;
+    const msg = `${res.ok.length} documento(s) importado(s)${res.relidos && res.relidos.length ? ` · ${res.relidos.length} relido(s) com a versão nova do app` : ''}${res.dup.length ? ` · ${res.dup.length} repetido(s)` : ''}${res.erros.length ? ` · ${res.erros.length} não reconhecido(s)` : ''}.`;
     toast(msg, res.erros.length ? '' : 'ok');
   }
 
@@ -751,6 +769,7 @@
       if (c && d.data.codEscritorio && !c.codEscritorio) c.codEscritorio = d.data.codEscritorio;
     }
     else d.link = { companyId: $('#lk-emp').value, referencia: U.refKey($('#lk-ref').value), tipo: $('#lk-tipo').value, numero: U.digits($('#lk-nf').value), cnpjRemetente: U.digits($('#lk-cnpj').value) };
+    d.link.manual = true; // ajustado pelo usuário: preservado se o arquivo for reimportado
     closeDrawer();
     commit();
     toast('Vínculo atualizado.', 'ok');
