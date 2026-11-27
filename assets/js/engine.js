@@ -437,7 +437,7 @@
         itemId: it ? it.id : null, descricao: it ? it.descricao : '', ncm: it ? it.ncm : '', cest: it ? it.cest : '', gtin: it ? it.gtin : '',
         valorItem: it ? U.round2(it.base || it.valorTotal || 0) : U.round2(ch.valorNF || 0), icmsCobrado: U.round2(it ? (it.icms || 0) : (ch.valorICMS || 0)),
         valorRevisar: Math.max(0, U.round2(vals.revisar || 0)), valorDevido: vals.devido !== undefined && vals.devido !== null ? U.round2(vals.devido) : null,
-        resumo: txt.resumo, fundamentacao: txt.fund, baseLegal: extra.base || R.base, documentos: extra.docs || R.docs, acao: extra.acao || R.acao,
+        resumo: txt.resumo, fundamentacao: txt.fund, cnaeInd: extra.cnaeInd || '', baseLegal: extra.base || R.base, documentos: extra.docs || R.docs, acao: extra.acao || R.acao,
         status: dec.status || 'novo', protocolo: dec.protocolo || '', dataPedido: dec.data || '', obs: dec.obs || ''
       });
     };
@@ -643,11 +643,17 @@
             const isento = me.status === 'isenta' || me.status === 'mei';
             const devido = isento ? 0 : U.round2((it.custoFinal || 0) * Math.max(0, aIntra - (it.aliqInter || 7)) / 100);
             const rev = U.round2((it.icms || 0) - devido);
-            const cnaeTxt = industrial ? `atividade industrial — CNAE ${company.cnaePrincipal.codigo}` : indSec ? `atividade de fabricação — CNAE secundário ${indSec.codigo}${indSec.descricao ? ' — ' + indSec.descricao : ''}` : alimentacao ? `CNAE ${alimentacao.codigo} — ${alimentacao.descricao}` : 'conforme atividade do estabelecimento';
+            // CNAE de fabricação a citar: o principal, se industrial; senão o primeiro secundário industrial
+            const cnaeFab = industrial ? ([company.cnaePrincipal].concat(company.cnaesSecundarios || []).find(c => c && U.cnaeIndustrial(c.codigo)) || null) : indSec;
+            const cnaeTxt = industrial ? (cnaeFab ? `fabricação própria — CNAE ${cnaeFab.codigo}${cnaeFab.descricao ? ' — ' + cnaeFab.descricao : ''}` : 'estabelecimento industrial') : indSec ? `atividade de fabricação — CNAE secundário ${indSec.codigo}${indSec.descricao ? ' — ' + indSec.descricao : ''}` : alimentacao ? `CNAE ${alimentacao.codigo} — ${alimentacao.descricao}` : 'conforme atividade do estabelecimento';
             if (rev > tol) add('ST_INSUMO', ch, it, { revisar: rev, devido }, {
               resumo: `${it.dest.origem === 'usuario' ? 'Destinação informada' : `Sugestão pela descrição (${it.dest.palavra})`}: insumo. Devido estimado (Equalização) ${brl(devido)}.`,
-              fund: `O item ${itTxt(it)} da ${nfTxt(ch)} é insumo utilizado no preparo dos produtos vendidos pelo estabelecimento (${cnaeTxt}) e não será revendido no estado em que foi adquirido. Sem a operação subsequente presumida, não subsiste a exigência do ICMS-ST com MVA (CF/88, art. 150, § 7º; LC nº 87/1996, art. 10)${industrial ? '; tratando-se de estabelecimento industrial, o regime não se aplica às mercadorias destinadas à industrialização (Convênio ICMS 142/2018, cláusula nona, III; Decreto nº 15.055/2018, art. 3º, § 1º, I, e § 2º)' : indSec ? '; o estabelecimento também exerce atividade de fabricação, e o regime não se aplica às mercadorias empregadas como matéria-prima em processo de industrialização (Convênio ICMS 142/2018, cláusula nona, III)' : ''}. Para o optante do Simples Nacional, a aquisição interestadual destinada à comercialização ou industrialização sujeita-se à Equalização, calculada sem MVA (Decreto nº 15.055/2018, arts. 3º a 5º)${isento ? ', da qual a empresa está isenta (Decreto nº 16.177/2023)' : ''}. Valor devido estimado: ${brl(devido)}; requer-se a revisão da cobrança em ${brl(rev)}.`
-            }, { forca: industrial ? 'forte' : 'moderada', base: industrial ? ['CF150_7', 'LC87_10', 'CONV142_9', 'DEC15055_IND', 'DEC15055_5', 'CTN165'] : indSec ? ['CF150_7', 'LC87_10', 'CONV142_9', 'DEC15055_3', 'DEC15055_5', 'CTN165'] : undefined });
+              fund: `O item ${itTxt(it)} da ${nfTxt(ch)} é insumo utilizado no preparo dos produtos vendidos pelo estabelecimento (${cnaeTxt}) e não será revendido no estado em que foi adquirido. Sem a operação subsequente presumida, não subsiste a exigência do ICMS-ST com MVA (CF/88, art. 150, § 7º; LC nº 87/1996, art. 10)${industrial ? '; tratando-se de estabelecimento industrial, o regime não se aplica às mercadorias destinadas à industrialização (Convênio ICMS 142/2018, cláusula nona, I e III; Lei Estadual nº 1.810/1997, art. 57, I; Decreto nº 15.055/2018, art. 3º, § 1º, I, e § 2º)' : indSec ? '; o estabelecimento também exerce atividade de fabricação, e o regime não se aplica às mercadorias empregadas como matéria-prima em processo de industrialização (Convênio ICMS 142/2018, cláusula nona, I e III; Lei Estadual nº 1.810/1997, art. 57, I)' : ''}. Para o optante do Simples Nacional, a aquisição interestadual destinada à comercialização ou industrialização sujeita-se à Equalização, calculada sem MVA (Decreto nº 15.055/2018, arts. 3º a 5º)${isento ? ', da qual a empresa está isenta (Decreto nº 16.177/2023)' : ''}. Valor devido estimado: ${brl(devido)}; requer-se a revisão da cobrança em ${brl(rev)}.`
+            }, {
+              forca: industrial ? 'forte' : 'moderada',
+              base: industrial ? ['CONV142_9', 'LEI1810_57', 'CF150_7', 'LC87_10', 'DEC15055_IND', 'DEC15055_5', 'CTN165'] : indSec ? ['CONV142_9', 'LEI1810_57', 'CF150_7', 'LC87_10', 'DEC15055_3', 'DEC15055_5', 'CTN165'] : undefined,
+              cnaeInd: cnaeFab ? cnaeFab.codigo : ''
+            });
           }
           // Despesas acessórias elevadas
           if ((it.outros || 0) > 50 && (it.valorTotal || 0) > 0 && (it.outros / it.valorTotal) * 100 > (+S.outrosLimitePct || 30)) {

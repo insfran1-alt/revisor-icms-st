@@ -142,6 +142,12 @@
     let ref = head ? head[4] : rx(flat, /Refer[êe]ncia:?\s*(\d{2}\/\d{4})/i);
     if (!ref) ref = rx(flat, /(?:^|\s)(\d{2}\/\d{4})(?:\s|$)/);
     let trib = text.match(/Tributo:?\s*\n?\s*(\d{2,4})\s*-\s*([^\n]+)/i);
+    // em alguns PDFs o rótulo "Tributo:" sai colado no endereço ("R BAHIA,1708Tributo: 0 - VILA ROSA…")
+    // e o código vem na linha seguinte ("333 - ST Comércio")
+    if (!trib || !/^\d{3}$/.test(trib[1])) {
+      const t2 = text.match(/(?:^|\n)\s*(\d{3})\s*-\s*((?:ST|ICMS|EQUALIZ|DIFAL|SUBST|ANTECIP)[^\n]*)/i);
+      if (t2) trib = t2;
+    }
     const tributoCodigo = trib ? trib[1] : '';
     const tributoNome = trib ? trib[2].trim() : '';
     const notas = [];

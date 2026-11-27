@@ -263,6 +263,15 @@
     },
     ST_INSUMO: (f, dae) => {
       const dev = f.valorDevido ? `; a Equalização de ${U.brl(f.valorDevido)}, será recolhida ${dae ? `no DAEMS ${dae}` : 'em DAEMS próprio'}` : '';
+      if (f.cnaeInd) {
+        // redação de pedido homologado pela SEFAZ/MS (insumo de confeitaria, CNAE 10.91-1-02, ref. 09/2026)
+        if (!dev) {
+          const longo = `Mercadoria destinada a insumo no processo de fabricação própria (CNAE ${f.cnaeInd}) conforme a Cláusula 9ª, I e III, do Convênio ICMS 142/2018 e o Art. 57, I, da Lei Estadual nº 1.810/1997`;
+          if (longo.length <= LIM_JUST - 1) return longo;
+        }
+        const t = `Insumo na fabricação própria (CNAE ${f.cnaeInd})${dev}`;
+        return caber(`${t} (Conv. ICMS 142/2018, cl. 9ª; Lei 1.810/97, art. 57, I)`, caber(`${t} (Conv. ICMS 142/2018, cl. 9ª)`, t));
+      }
       const t = `Insumo usado no preparo de alimentos, não revendido${dev}`;
       return caber(`${t} (CF art. 150 §7º; Dec. 15.055/2018)`, t);
     },
@@ -288,7 +297,9 @@
     const principal = ord[0];
     const motivoKey = MOTIVO_DA_REGRA[principal.ruleId] || 'OUTROS';
     // o campo Descrição do e-Fazenda não aceita caracteres especiais: só letras sem acento, números e espaços (sem o valor, que a SEFAZ revisa)
-    const descricao = cortar(semEspeciais(`${principal.regra}${ord.length > 1 ? ` e mais ${ord.length - 1}` : ''}`), LIM_DESC);
+    // insumo de estabelecimento com fabricação: mesma descrição do pedido homologado ("Insumo para fabricacao confeitaria")
+    const nomeRegra = principal.ruleId === 'ST_INSUMO' && principal.cnaeInd ? (/^1091/.test(U.digits(principal.cnaeInd)) ? 'Insumo para fabricacao confeitaria' : 'Insumo para fabricacao propria') : principal.regra;
+    const descricao = cortar(semEspeciais(`${nomeRegra}${ord.length > 1 ? ` e mais ${ord.length - 1}` : ''}`), LIM_DESC);
     // junta achados inteiros enquanto couberem; só o primeiro pode ser cortado. O texto com o nº do DAEMS vem primeiro.
     const D = global.RST_DAEMS;
     const textos = U.uniq(ord.map(f => curto(f, D && daems ? D.numeroDo(daems, f) : '')));
