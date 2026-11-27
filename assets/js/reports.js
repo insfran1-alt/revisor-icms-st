@@ -142,7 +142,7 @@
     const anexoDev = dev.length ? `<div class="anexo"><h2>Anexo — Memória de cálculo do DIFAL e da Equalização</h2>${dev.map(g => `<h3>${e(D.TIPOS[g.tipo].nome)}${g.daems.numero ? ` — DAEMS nº ${e(g.daems.numero)}` : ''}</h3>
       <table><thead><tr><th>NF</th><th>Item</th><th class="num">Valor da operação</th><th class="num">Alíq. inter.</th><th class="num">Alíq. interna</th><th class="num">ICMS origem</th><th class="num">Base de cálculo</th><th class="num">Devido</th></tr></thead><tbody>
       ${g.linhas.map(l => `<tr><td>${e(l.numero)}</td><td>${e(l.descricao)}</td><td class="num">${U.brl(l.valorOperacao)}</td><td class="num">${U.fmt(l.aliqInter, 2)}%</td><td class="num">${U.fmt(l.aliqIntra, 2)}%</td><td class="num">${l.icmsOrigem !== null ? U.brl(l.icmsOrigem) : '—'}</td><td class="num">${U.brl(l.bc)}</td><td class="num">${U.brl(l.devido)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><th colspan="7">Total</th><th class="num">${U.brl(g.total)}</th></tr></tfoot></table><p class="small">${e(g.linhas[0].metodo)}.</p>`).join('')}</div>` : '';
+      <tfoot><tr><th colspan="7">Total</th><th class="num">${U.brl(g.total)}</th></tr></tfoot></table>`).join('')}</div>` : '';
     const anexo = fs.map((f, i) => `<p><b>${i + 1}. NF ${e(f.numero)}${f.descricao ? ' — ' + e(f.descricao) : ''}</b> · ${e(f.regra)} · a revisar ${U.brl(f.valorRevisar)}<br>${e(f.fundamentacao)}<br><span class="small">Base legal: ${e(L.citacoes(f.baseLegal).join('; '))}</span></p>`).join('');
 
     const body = `

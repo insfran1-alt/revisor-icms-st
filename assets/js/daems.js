@@ -27,8 +27,11 @@
     const v = it.custoFinal || it.base || 0;
     const aInter = it.aliqInter || 7;
     const aIntra = it.aliqIntra || +S.aliqInterna || 17;
+    const ch = (model.chargesById && model.chargesById.get(f.chargeId)) || {};
+    const nf = (ch.nfKey && model.nfsByKey.get(ch.nfKey)) || {};
     const m = {
       tipo, findingId: f.id, companyId: f.companyId, referencia: f.referencia, numero: f.numero, cnpjRemetente: f.cnpjRemetente, ufRemetente: f.ufRemetente,
+      remetente: nf.remetenteNome || '', emissao: ch.dataEmissao || f.dataEmissao || '', chave: ch.chave || f.chave || '', origemCredito: '',
       descricao: f.descricao || it.descricao || '', ncm: f.ncm || it.ncm || '', cest: f.cest || it.cest || '', regra: f.regra,
       icmsCobrado: f.icmsCobrado || it.icms || 0, revisar: f.valorRevisar, valorOperacao: U.round2(v), aliqInter: aInter, aliqIntra: aIntra,
       metodo: '', icmsOrigem: null, bc: null, icmsDestino: null, devido: U.round2(f.valorDevido || 0)
@@ -36,8 +39,10 @@
     if (tipo === 'DIFAL' && S.difalMetodo !== 'simples') {
       const icmsOrig = it.credito > 0 ? it.credito : U.round2((it.bcProprio || v) * aInter / 100);
       const bc = (v - icmsOrig) / (1 - aIntra / 100);
+      m.origemCredito = it.credito > 0 ? 'Crédito admitido na memória da SEFAZ' : (it.bcProprio ? 'BC do ICMS próprio × alíq. interestadual' : 'Valor × alíq. interestadual');
       Object.assign(m, { metodo: 'Base "por dentro": BC = (valor − ICMS de origem) ÷ (1 − alíq. interna); devido = BC × alíq. interna − ICMS de origem', icmsOrigem: U.round2(icmsOrig), bc: U.round2(bc), icmsDestino: U.round2(bc * aIntra / 100) });
     } else {
+      m.origemCredito = 'Valor × alíq. interestadual';
       Object.assign(m, { metodo: tipo === 'DIFAL' ? 'Diferença simples: valor × (alíq. interna − alíq. interestadual)' : 'Valor da operação × (alíq. interna − alíq. interestadual), sem MVA', bc: U.round2(v) });
     }
     return m;
@@ -79,39 +84,101 @@
     const s = v => ({ t: 's', v: String(v ?? '') });
     const pct = v => ({ t: 'n', v: v / 100, z: '0.00%' });
 
-    const res = [['Empresa', 'IE', 'Referência', 'Imposto', 'Itens', 'Valor devido (memória)', 'Nº do DAEMS', 'Valor do DAEMS', 'Vencimento', 'Pago em', 'Diferença', 'Fundamento', 'Observação'].map(s)];
-    grupos.forEach((g, i) => {
-      const r = i + 2, c = model.companies.get(g.companyId) || {};
-      res.push([s(nomeEmp(g.companyId)), s(c.ie || ''), s(U.refLabel(g.referencia)), s(TIPOS[g.tipo].nome), num(g.linhas.length, '0'), num(g.total), s(g.daems.numero), num(g.daems.valor), s(U.brDate(g.daems.vencimento)), s(U.brDate(g.daems.pagoEm)),
-        g.daems.valor === '' ? s('') : { t: 'n', f: `ROUND(H${r}-F${r},2)`, z: M }, s(TIPOS[g.tipo].base), s(g.daems.obs)]);
-    });
-    const wsR = X.utils.aoa_to_sheet([[]]); X.utils.sheet_add_aoa(wsR, res, { origin: 'A1' });
-    wsR['!cols'] = [30, 12, 10, 34, 7, 16, 20, 14, 11, 11, 11, 60, 40].map(w => ({ wch: w }));
+    const dt = iso => (iso && /^\d{4}-\d{2}-\d{2}/.test(iso) ? { t: 'd', v: new Date(iso.slice(0, 10) + 'T12:00:00'), z: 'dd/mm/yyyy' } : s(''));
+    const fx = (f, z = M) => ({ t: 'n', f, z });
+    const L = i => { let n = i + 1, r = ''; while (n > 0) { const m = (n - 1) % 26; r = String.fromCharCode(65 + m) + r; n = Math.floor((n - m - 1) / 26); } return r; };
+    const mod = t => t === 'DIFAL' ? 'DIFAL' : 'Equalização';
+    const H0 = 6; // linha do cabeçalho das tabelas; dados a partir da 7
+    const empresas = U.uniq(grupos.map(g => g.companyId)), refs = U.uniq(grupos.map(g => g.referencia));
+    const c1 = empresas.length === 1 ? (model.companies.get(empresas[0]) || {}) : null;
+    const cab = titulo => [
+      [s(titulo)],
+      [s(c1 ? `Empresa: ${c1.razaoSocial || c1.nomeFantasia || ''}` : 'Empresas: várias (ver coluna Empresa)'), s(c1 && c1.cnpj ? `CNPJ: ${U.fmtCNPJ(c1.cnpj)}` : ''), s(c1 && c1.ie ? `IE: ${c1.ie}` : '')],
+      [s(`Referência: ${refs.map(U.refLabel).join(', ')}`), s(`Gerado em: ${U.brDate(U.today())}`)],
+      [s('Fonte: memórias de cálculo da SEFAZ/MS (ICMS-ST cobrado) e NF-e de entrada; itens revisados por não se destinarem à revenda (uso e consumo, brinde, degustação ou insumo) ou por não estarem sujeitos à ST.')],
+      []
+    ];
 
-    const hdr = ['Empresa', 'Referência', 'Imposto', 'NF', 'CNPJ remetente', 'UF', 'Item', 'NCM', 'Motivo da revisão', 'ICMS-ST cobrado', 'Valor da operação (custo final)', 'Alíq. interestadual', 'Alíq. interna', 'ICMS de origem', 'Base de cálculo', 'ICMS no destino', 'Valor devido', 'Nº do DAEMS', 'Método de cálculo'];
-    const linhas = [hdr.map(s)];
+    // ---------- Por item ----------
+    const CI = ['Empresa', 'Referência', 'Modalidade', 'CNPJ remetente', 'Remetente', 'UF', 'NF-e', 'Emissão', 'Chave de acesso', 'Item', 'NCM', 'Motivo da revisão', 'ICMS-ST cobrado', 'Produto+Frete+IPI', 'Alíquota Inter.', 'Crédito ICMS', 'Origem do crédito', 'Alíquota Destino', 'B.C ICMS', 'Débito ICMS', 'Total a Recolher', 'Nº do DAEMS'];
+    const ci = k => L(CI.indexOf(k));
+    const aI = cab('Memória de cálculo por item — ICMS DIFAL e Equalização').concat([CI.map(s)]);
     grupos.forEach(g => g.linhas.forEach(l => {
-      const r = linhas.length + 1;
-      const dev = l.tipo === 'DIFAL' && l.icmsOrigem !== null ? { t: 'n', f: `ROUND(P${r}-N${r},2)`, z: M } : { t: 'n', f: `ROUND(K${r}*(M${r}-L${r}),2)`, z: M };
-      linhas.push([s(nomeEmp(g.companyId)), s(U.refLabel(g.referencia)), s(TIPOS[g.tipo].curto), num(+l.numero, '0'), s(U.fmtCNPJ(l.cnpjRemetente || '')), s(l.ufRemetente || ''), s(l.descricao), s(U.fmtNCM(l.ncm)), s(l.regra),
-        num(l.icmsCobrado), num(l.valorOperacao), pct(l.aliqInter), pct(l.aliqIntra), num(l.icmsOrigem), num(l.bc),
-        l.icmsOrigem !== null ? { t: 'n', f: `ROUND(O${r}*M${r},2)`, z: M } : s(''), dev, s(g.daems.numero), s(l.metodo)]);
+      const r = aI.length + 1;
+      const v = ci('Produto+Frete+IPI'), ai = ci('Alíquota Inter.'), cr = ci('Crédito ICMS'), ad = ci('Alíquota Destino'), bc = ci('B.C ICMS'), db = ci('Débito ICMS');
+      const porDentro = l.tipo === 'DIFAL' && l.icmsOrigem !== null;
+      aI.push([s(nomeEmp(g.companyId)), s(U.refLabel(g.referencia)), s(mod(l.tipo)), s(U.fmtCNPJ(l.cnpjRemetente || '')), s(l.remetente), s(l.ufRemetente || ''), num(+l.numero, '0'), dt(l.emissao), s(l.chave), s(l.descricao), s(U.fmtNCM(l.ncm)), s(l.regra),
+        num(l.icmsCobrado), num(l.valorOperacao), pct(l.aliqInter), porDentro ? num(l.icmsOrigem) : fx(`${v}${r}*${ai}${r}`), s(l.origemCredito), pct(l.aliqIntra),
+        porDentro ? fx(`(${v}${r}-${cr}${r})/(1-${ad}${r})`) : fx(`${v}${r}`), fx(`${bc}${r}*${ad}${r}`), fx(`ROUND(${db}${r}-${cr}${r},2)`), s(g.daems.numero)]);
     }));
-    const last = linhas.length;
-    const tot = Array.from({ length: 19 }, () => s(''));
-    tot[0] = s('TOTAL');
-    tot[9] = { t: 'n', f: `SUBTOTAL(9,J2:J${last})`, z: M };
-    tot[16] = { t: 'n', f: `SUBTOTAL(9,Q2:Q${last})`, z: M };
-    linhas.push(tot);
-    const wsM = X.utils.aoa_to_sheet([[]]); X.utils.sheet_add_aoa(wsM, linhas, { origin: 'A1' });
-    wsM['!cols'] = [28, 10, 11, 9, 19, 5, 44, 11, 34, 13, 15, 10, 10, 12, 13, 13, 13, 20, 70].map(w => ({ wch: w }));
-    wsM['!autofilter'] = { ref: `A1:S${last}` };
+    const lastI = aI.length, iniI = H0 + 1;
+    const totI = CI.map(() => s('')); totI[0] = s('TOTAL');
+    ['ICMS-ST cobrado', 'Produto+Frete+IPI', 'Crédito ICMS', 'B.C ICMS', 'Débito ICMS', 'Total a Recolher'].forEach(k => { totI[CI.indexOf(k)] = fx(`SUBTOTAL(9,${ci(k)}${iniI}:${ci(k)}${lastI})`); });
+    aI.push(totI);
+    const wsI = X.utils.aoa_to_sheet([[]]); X.utils.sheet_add_aoa(wsI, aI, { origin: 'A1', cellDates: true });
+    wsI['!cols'] = [26, 10, 11, 19, 30, 5, 9, 11, 46, 44, 11, 34, 13, 15, 10, 12, 34, 10, 14, 13, 14, 20].map(w => ({ wch: w }));
+    wsI['!autofilter'] = { ref: `A${H0}:${L(CI.length - 1)}${lastI}` };
+
+    // ---------- Por nota ----------
+    const CN = ['Empresa', 'Referência', 'Modalidade', 'CNPJ remetente', 'Remetente', 'UF', 'NF-e', 'Emissão', 'Chave de acesso', 'Itens', 'ICMS-ST cobrado nos itens', 'Produto+Frete+IPI', 'Crédito ICMS', 'B.C ICMS', 'Débito ICMS', 'Total a Recolher', 'Nº do DAEMS'];
+    const cn = k => L(CN.indexOf(k));
+    const aN = cab('Memória de cálculo por nota fiscal — ICMS DIFAL e Equalização').concat([CN.map(s)]);
+    const IT = `'Por item'!`;
+    const crit = r => `${IT}$A:$A,$A${r},${IT}$B:$B,$B${r},${IT}$C:$C,$C${r},${IT}$D:$D,$D${r},${IT}$G:$G,$G${r}`;
+    const sumI = (k, r) => fx(`SUMIFS(${IT}$${ci(k)}:$${ci(k)},${crit(r)})`);
+    grupos.forEach(g => {
+      const notas = []; g.linhas.forEach(l => { if (!notas.some(n => n.numero === l.numero && n.cnpjRemetente === l.cnpjRemetente)) notas.push(l); });
+      notas.forEach(n => {
+        const r = aN.length + 1;
+        aN.push([s(nomeEmp(g.companyId)), s(U.refLabel(g.referencia)), s(mod(g.tipo)), s(U.fmtCNPJ(n.cnpjRemetente || '')), s(n.remetente), s(n.ufRemetente || ''), num(+n.numero, '0'), dt(n.emissao), s(n.chave),
+          fx(`COUNTIFS(${crit(r)})`, '0'), sumI('ICMS-ST cobrado', r), sumI('Produto+Frete+IPI', r), sumI('Crédito ICMS', r), sumI('B.C ICMS', r), sumI('Débito ICMS', r), sumI('Total a Recolher', r), s(g.daems.numero)]);
+      });
+    });
+    const lastN = aN.length;
+    const totN = CN.map(() => s('')); totN[0] = s('TOTAL');
+    ['Itens', 'ICMS-ST cobrado nos itens', 'Produto+Frete+IPI', 'Crédito ICMS', 'B.C ICMS', 'Débito ICMS', 'Total a Recolher'].forEach(k => { totN[CN.indexOf(k)] = fx(`SUBTOTAL(9,${cn(k)}${iniI}:${cn(k)}${lastN})`, k === 'Itens' ? '0' : M); });
+    aN.push(totN);
+    const wsN = X.utils.aoa_to_sheet([[]]); X.utils.sheet_add_aoa(wsN, aN, { origin: 'A1', cellDates: true });
+    wsN['!cols'] = [26, 10, 11, 19, 30, 5, 9, 11, 46, 6, 14, 15, 12, 14, 13, 14, 20].map(w => ({ wch: w }));
+    wsN['!autofilter'] = { ref: `A${H0}:${L(CN.length - 1)}${lastN}` };
+
+    // ---------- Apuração (por modalidade) ----------
+    const CA = ['Empresa', 'Referência', 'Modalidade', 'Notas', 'Itens', 'Produto+Frete+IPI', 'Crédito ICMS', 'B.C ICMS', 'Débito ICMS', 'Total a Recolher', 'Nº do DAEMS', 'Valor do DAEMS', 'Vencimento', 'Pago em', 'Diferença (DAEMS − apurado)', 'Fundamento legal', 'Observação'];
+    const ca = k => L(CA.indexOf(k));
+    const aA = cab('Apuração do ICMS DIFAL e Equalização — itens retirados da cobrança do ICMS-ST').concat([CA.map(s)]);
+    const NT = `'Por nota'!`;
+    const critA = r => `${IT}$A:$A,$A${r},${IT}$B:$B,$B${r},${IT}$C:$C,$C${r}`;
+    grupos.forEach(g => {
+      const r = aA.length + 1;
+      const sA = k => fx(`SUMIFS(${IT}$${ci(k)}:$${ci(k)},${critA(r)})`);
+      aA.push([s(nomeEmp(g.companyId)), s(U.refLabel(g.referencia)), s(mod(g.tipo)), fx(`COUNTIFS(${NT}$A:$A,$A${r},${NT}$B:$B,$B${r},${NT}$C:$C,$C${r})`, '0'), fx(`COUNTIFS(${critA(r)})`, '0'),
+        sA('Produto+Frete+IPI'), sA('Crédito ICMS'), sA('B.C ICMS'), sA('Débito ICMS'), sA('Total a Recolher'),
+        s(g.daems.numero || 'a informar'), num(g.daems.valor), dt(g.daems.vencimento), dt(g.daems.pagoEm),
+        g.daems.valor === '' ? s('') : fx(`ROUND(${ca('Valor do DAEMS')}${r}-${ca('Total a Recolher')}${r},2)`), s(TIPOS[g.tipo].base), s(g.daems.obs)]);
+    });
+    const lastA = aA.length;
+    const totA = CA.map(() => s('')); totA[0] = s('TOTAL');
+    ['Notas', 'Itens', 'Produto+Frete+IPI', 'Crédito ICMS', 'B.C ICMS', 'Débito ICMS', 'Total a Recolher', 'Valor do DAEMS'].forEach(k => { totA[CA.indexOf(k)] = fx(`SUM(${ca(k)}${iniI}:${ca(k)}${lastA})`, ['Notas', 'Itens'].includes(k) ? '0' : M); });
+    aA.push(totA);
+    const rt = aA.length;
+    aA.push([]);
+    aA.push([s('Conferência'), s(''), s('Total a recolher')]);
+    aA.push([s('Soma por item'), s(''), fx(`${IT}${ci('Total a Recolher')}${lastI + 1}`)]);
+    aA.push([s('Soma por nota'), s(''), fx(`${NT}${cn('Total a Recolher')}${lastN + 1}`)]);
+    aA.push([s('Apuração'), s(''), fx(`${ca('Total a Recolher')}${rt}`)]);
+    aA.push([s('Situação'), s(''), { t: 's', f: `IF(AND(ROUND(C${rt + 3}-C${rt + 4},2)=0,ROUND(C${rt + 4}-C${rt + 5},2)=0),"Conferido: item, nota e apuração iguais","Divergência entre as abas")` }]);
+    aA.push([]);
+    const sig = c1 && c1.signatario && c1.signatario.nome ? `${c1.signatario.nome}${c1.signatario.cargo ? ' — ' + c1.signatario.cargo : ''}` : '';
+    aA.push([s(`Responsável: ${sig || '____________________________________'}`)]);
+    const wsA = X.utils.aoa_to_sheet([[]]); X.utils.sheet_add_aoa(wsA, aA, { origin: 'A1', cellDates: true });
+    wsA['!cols'] = [30, 11, 12, 7, 7, 15, 13, 14, 13, 14, 20, 14, 11, 11, 14, 60, 30].map(w => ({ wch: w }));
 
     const wb = X.utils.book_new();
-    X.utils.book_append_sheet(wb, wsR, 'DAEMS');
-    X.utils.book_append_sheet(wb, wsM, 'Memória de cálculo');
-    X.writeFile(wb, nomeArquivo || `memoria-difal-equalizacao-${U.today()}.xlsx`);
-    return { grupos: grupos.length, itens: last - 1 };
+    X.utils.book_append_sheet(wb, wsA, 'Apuração');
+    X.utils.book_append_sheet(wb, wsN, 'Por nota');
+    X.utils.book_append_sheet(wb, wsI, 'Por item');
+    X.writeFile(wb, nomeArquivo || `apuracao-difal-equalizacao-${U.today()}.xlsx`);
+    return { grupos: grupos.length, itens: lastI - H0 };
   }
 
   global.RST_DAEMS = { TIPOS, tipoDevido, fmtDaems, MASK, chave, memoria, apurar, numeroDo, exportar };

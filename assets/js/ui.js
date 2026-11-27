@@ -513,7 +513,7 @@
         </div>
         <div class="stack">
           <div class="callout">Emita o DAEMS de cada valor (empresa, referência e imposto) e informe o número no formato <b>01.170.776.181-49</b>. O número entra na <b>justificativa do 1º pedido</b> no e-Fazenda e no <b>requerimento</b>, com a memória de cálculo anexa.</div>
-          <div class="row"><button class="btn primary" type="button" data-act="export-daems">${ic('download')} Memória de cálculo (Excel)</button><button class="btn" type="button" data-act="open-efazenda">${ic('list')} 1º pedido (e-Fazenda)</button></div>
+          <div class="row"><button class="btn primary" type="button" data-act="export-daems">${ic('download')} Apuração e memória de cálculo (Excel)</button><button class="btn" type="button" data-act="open-efazenda">${ic('list')} 1º pedido (e-Fazenda)</button></div>
         </div>
       </div>
       ${grupos.map(g => {
@@ -537,7 +537,7 @@
               ${g.linhas.map(l => `<tr><td class="nowrap"><b>${h(l.numero)}</b><div class="sub">${h(U.fmtCNPJ(l.cnpjRemetente || ''))}${l.ufRemetente ? '/' + h(l.ufRemetente) : ''}</div></td><td class="desc small"><b>${h(l.descricao)}</b><div class="sub">NCM ${h(U.fmtNCM(l.ncm))} · ${h(l.regra)}</div></td>
                 <td class="num">${U.brl(l.icmsCobrado)}</td><td class="num">${U.brl(l.valorOperacao)}</td><td class="num">${U.fmt(l.aliqInter, 2)}%</td><td class="num">${U.fmt(l.aliqIntra, 2)}%</td><td class="num">${l.icmsOrigem !== null ? U.brl(l.icmsOrigem) : '—'}</td><td class="num">${U.brl(l.bc)}</td><td class="num"><b>${U.brl(l.devido)}</b></td></tr>`).join('')}
             </tbody><tfoot><tr><th colspan="8">Total</th><th class="num">${U.brl(g.total)}</th></tr></tfoot></table></div>
-            <div class="small muted">${h(g.linhas[0].metodo)}. Fundamento: ${h(D.TIPOS[g.tipo].base)}.</div>
+            <div class="small muted">Fundamento: ${h(D.TIPOS[g.tipo].base)}.</div>
           </div></div>`;
       }).join('')}
     </div>`;
@@ -1928,7 +1928,11 @@
     },
     'export-sos': () => exportarSOS(),
     'export-daems': () => {
-      try { const r = DA().exportar(App.model, gruposDaems(), `memoria-difal-equalizacao${App.ui.ref ? '-' + App.ui.ref : ''}-${U.today()}.xlsx`); toast(`Memória de cálculo gerada: ${r.itens} item(ns) em ${r.grupos} DAEMS.`, 'ok'); }
+      try {
+        const c = App.model.companies.get(App.ui.empresa);
+        const r = DA().exportar(App.model, gruposDaems(), `Apuração ICMS DIFAL e Equalização${c ? ' - ' + (c.nomeFantasia || c.razaoSocial || '').replace(/[\\/:*?"<>|]+/g, ' ').trim() : ''}${App.ui.ref ? ' - ' + U.refLabel(App.ui.ref).replace('/', '.') : ''}.xlsx`);
+        toast(`Apuração gerada: ${r.itens} item(ns) em ${r.grupos} modalidade(s), por item, por nota e por modalidade.`, 'ok');
+      }
       catch (e) { console.error(e); toast('Não foi possível gerar a planilha: ' + h(e.message), 'err'); }
     },
     'vendas-filtro': el => {

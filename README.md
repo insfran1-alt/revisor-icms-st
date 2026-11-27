@@ -85,7 +85,10 @@ O que a tela faz:
 - **Dados do DAEMS:** guarda o número (formato `01.170.776.181-49`), o valor, o vencimento e a data do pagamento.
 - **Justificativa do 1º pedido no e-Fazenda:** com o número informado, a justificativa passa a citar o DAEMS, dentro dos 199 caracteres. Ex.: "devido só o DIFAL de R$ 209,78, recolhido no DAEMS 01.170.776.181-49".
 - **Requerimento:** traz o quadro "1.2. Valores que continuam devidos e seu recolhimento", o pedido de reconhecimento do recolhimento e um anexo com a memória de cálculo.
-- **Excel:** aba *DAEMS* (resumo e diferença entre o valor do DAEMS e o da memória) e aba *Memória de cálculo*, com as fórmulas.
+- **Excel – Apuração ICMS DIFAL e Equalização:** três abas ligadas por fórmulas, cada uma com cabeçalho de identificação (empresa, CNPJ, IE, referência, data e fonte).
+  - **Apuração:** totais por modalidade, com o nº e o valor do DAEMS, o vencimento, o pagamento, a diferença, o fundamento legal, a conferência item × nota × apuração e o campo do responsável.
+  - **Por nota:** remetente, NF-e, emissão, chave de acesso e totais de cada nota.
+  - **Por item:** as mesmas colunas da planilha usada no escritório (Produto+Frete+IPI, Alíquota Inter., Crédito ICMS, Alíquota Destino, B.C ICMS, Débito ICMS, Total a Recolher), com o motivo da revisão e o ICMS-ST cobrado.
 
 ## Vendas × ST (Registro de Saídas e Controle do Simples)
 
